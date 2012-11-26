@@ -1,0 +1,185 @@
+"""
+This a fairly special URL Service that wraps around a custom URL (i.e: only ever seen as 
+part of this plugin and not seen in the wild) and which is designed to minimise the number
+of requests we make to IceFilms. 
+
+Since each provider URL is hidden away behind a layer of requests, this URL Service allows
+us to delay making all these request until the user actually choose to play a video from a
+source. At that point, this will retrieve the real Provider's URL from IceFilms and 
+interact with Plex's URL Service to make sure the real provider's URL Service is called.
+"""
+
+import re, urlparse, cgi, base64
+
+import urllib, urllib2
+import random
+
+from datetime import date
+
+USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22'
+
+ICEFILMS_URL = "http://www.icefilms.info"
+ICEFILMS_VIDEO_URL = ICEFILMS_URL + "/ip.php?v=%s"
+ICEFILMS_SOURCES_URL = ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.php?h=374&w=631&vid=%s&img="
+ICEFILMS_AJAX = ICEFILMS_URL+'membersonly/components/com_iceplayer/video.phpAjaxResp.php'
+ICEFILMS_REFERRER = ICEFILMS_URL
+
+PLEX_URL = "http://127.0.0.1:32400"
+PLUGIN_URL = PLEX_URL + "/video/icefilms"
+
+def NormalizeURL(url):
+
+	return url
+	
+def MetadataObjectForURL(url):
+
+	#Log('In MetadataObjectForURL for IceFilms (' + url + ')')
+	
+	video = None
+	
+	# Plugin should have access to info about this URL if user used plugin to launch video.
+	# Bad things can happen here. Still want to run rest of code if possible though...
+	try:
+		request = urllib2.Request(PLUGIN_URL + "/mediainfo/%s" % String.Encode(url))
+		mediainfo = JSON.ObjectFromString(urllib2.urlopen(request).read())
+		
+		#Log(mediainfo)
+		
+		video = VideoClipObject(
+			title=mediainfo['title'],
+			summary=mediainfo['summary'],
+			art=mediainfo['background'],
+			thumb= mediainfo['poster'],
+			rating = float(mediainfo['rating']),
+			duration=mediainfo['duration'],
+			year=mediainfo['year'],
+			originally_available_at= (
+				date.fromordinal(mediainfo['release_date'])
+				if ('release_date' in mediainfo and mediainfo['release_date'])  else None
+			),
+			genres=mediainfo['genres'],
+		)
+		
+	except Exception, ex:
+		Log(ex)
+		
+	#Log(video)
+
+	if video is None:
+		# Return bare minimum. This is never shown to users.
+		video = VideoClipObject(
+			title = 'IceFilms Redirect Page',
+			summary = 'IceFilms Redirect Page',
+			thumb = None,
+		)
+	
+	return video
+
+def MediaObjectsForURL(url):
+	
+	# Delay working out the real provider's URL until video is picked.
+	# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id
+	ret = []
+	ret.append(
+		MediaObject(
+			parts = [PartObject(key=Callback(PlayVideo, url=url))],
+		)
+	)
+	
+  	return ret
+
+@indirect
+def PlayVideo(url):
+
+	id_reg_ex = re.compile("/external/(\d+)/(\d+)")
+	match = id_reg_ex.search(url)
+	id = match.group(1)
+	part_id = match.group(2)
+
+	# Reload sources page to make sure we've got latest version of all the bits we need.
+	sources_page = HTTP.Request(ICEFILMS_SOURCES_URL  % id, cacheTime=0)
+	
+	# Extract out the secret arguments that are needed to get the real URL of 
+	# sources for this item.
+	secret = re.search("f\.lastChild\.value=\"([^\"]+)\",a", sources_page.content).group(1)
+	t = re.search('"&t=([^"]+)",', sources_page.content).group(1)
+	
+	params = {}
+	params['id'] = part_id
+	params['s'] = random.randrange(5, 50)
+	params['iqs'] = ''	
+	params['url'] = ''
+	params['m'] = random.randrange(100, 300) * -1
+	params['cap'] = ''
+	params['sec'] = secret
+	params['t'] = t	
+
+	page = HTTP.Request(ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.phpAjaxResp.php", params).content
+	page = HTTP.Request(ICEFILMS_URL + page).content
+	
+	url_loc = page.rfind('http')
+
+	if url_loc == -1:
+		return None
+
+	url_end = page.find('<', url_loc)
+	provider_url = urllib.unquote(page[url_loc:url_end])
+	
+	media_objects = URLService.MediaObjectsForURL(provider_url)
+	
+	if (len(media_objects) > 0):
+		PlaybackStarted(url=url)
+		
+	return ObjectContainer(
+		objects = [
+			VideoClipObject(
+				items = media_objects
+			)
+		]
+	)
+	
+def LogProviderError(msg="", ex=None):
+
+	Log("************************** PROVIDER ERROR: " + msg)
+	return []
+	
+##################################################################################################
+# LMWT Plugin specific helper methods.
+def PlaybackStarted(url):
+	
+	# Bad things can happen here. Let's try to be neat though....
+	try:
+	
+		caller = "icefilms"
+		
+		# We may be playing the video on behalf of another plugin. In that case, we'll need to
+		# call that plugin's PlaybackStarted method insted of our own.
+		#
+		# Check if this is the case by seeing who originally called for the source listing.
+		try:
+			request = urllib2.Request(
+				PLUGIN_URL + "/playback/caller/" + String.Encode(url)
+			)
+			caller = JSON.ObjectFromString(urllib2.urlopen(request).read())['caller']
+		except Exception, ex:
+			pass
+		
+		# Get the media info object that was built by this plugin when generating the
+		#Êsource listing. We'll use the info in that to talk to whatever plugin we need to
+		# tell the item has started playing. 
+		request = urllib2.Request(PLUGIN_URL + "/mediainfo/" + String.Encode(url))
+		mediainfo = JSON.ObjectFromString(urllib2.urlopen(request).read())
+		
+		# Use the information from the mediainfo to call the PlaybackStarted method of
+		# whatever plugin requested this.
+		url = PLEX_URL + '/video/' + caller + "/playback/%s" % mediainfo['id']		
+		if (mediainfo['ep_num']):
+			url += "/" + str(mediainfo['season']) + "/" + str(mediainfo['ep_num'])
+		Log(url)
+		
+		request = urllib2.Request(url)
+		response = urllib2.urlopen(request)
+		
+	except Exception, ex:
+		Log.Exception("Error whilst trying to mark item as played")
+		pass

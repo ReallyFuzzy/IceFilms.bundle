@@ -1,0 +1,61 @@
+[
+    {
+        "id": "watched_amount",
+        "type": "enum",
+        "label": "Number of items in Recently Watched list:",
+        "values": ["Disabled","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30"],
+        "default": "15"
+    },
+    {
+        "id": "watched_grouping",
+        "type": "enum",
+        "label": "Group TV shows in Recently Watched list by:",
+        "values": ["Show", "Season", "Episode"],
+        "default": "Season"
+    },
+    {
+        "id": "watched_indicator",
+        "type": "enum",
+        "label": "Put an indcator for unwatched items in:",
+        "values": ["Disabled", "TV Shows", "All"],
+        "default": "TV Shows"
+    },
+    {
+        "id": "favourite_sort",
+        "type": "enum",
+        "label": "Sort Favourties By:",
+        "values": ["Alphabetical", "Date Added"],
+        "default": "Alphabetical"
+    },
+    {
+        "id": "favourite_notify_email",
+        "type": "text",
+        "label": "Email to notify when new Favourites are found:",
+        "default": ""
+    },
+    {
+        "id": "favourite_notify_email_test",
+        "type": "bool",
+        "label": "Send Test Email",
+        "default": "false"
+    },
+    {
+        "id": "meta_retrieve",
+        "type": "enum",
+        "label": "Retrieve metadata from external providers:",
+        "values": ["Disabled", "TV Shows", "Movies", "All"],
+        "default": "All"
+    },
+    {
+        "id": "versiontracking",
+        "type": "bool",
+        "label": "Help measure interest in this plugin",
+        "default": "true"
+    },
+    {
+        "id": "show_unsupported",
+        "type": "bool",
+        "label": "Show unsupported and disabled providers",
+        "default": "false"
+    }
+]

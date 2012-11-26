@@ -1,0 +1,1 @@
+[	{		"id": "rs_show", "label": "Rapid Share",		"type": "bool", "default": "true",	},  	{        "id": "rs_username",        "type": "text",        "label": "  - Username",        "default": ""    },    {        "id": "rs_password",        "type": "text",        "label": "  - Password",        "default": "",        "option": "hidden"    },]

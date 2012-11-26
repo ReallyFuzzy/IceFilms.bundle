@@ -1,0 +1,76 @@
+{
+
+"Title": "IceFilms",
+"NoOpTitle":"----------------------",
+
+//================ Main Menu ===============
+"MoviesTitle":"Movies",
+"MoviesSubtitle":"Movies",
+"MoviesSummary":"Watch High Quality Movies. Your one stop shop for DVD and BluRay releases.",
+
+"TVTitle":"TV Shows",
+"TVSubtitle":"TV Shows & Episodes",
+"TVSummary":"Collection of TV Shows and Episodes",
+
+"HistoryTitle":"Recently Watched",
+"HistorySubtitle":"Access recently watched items",
+"HistorySummary":"Quick access to items you have recently watched.",
+	
+"FavouritesTitle":"Favourites",
+"FavouritesSummary":"Quickly access your favourite items.",
+
+"PrefsTitle":"Preferences",
+"PrefsSubtitle":"Set your preferences here",
+"PrefsSummary":"Set your preferences here", 
+
+//========= Recently Watched Menu ============
+"HistoryTitle":"Recently Watched",
+
+"HistoryClearTitle":"Clear...",	
+"HistoryClearSummary":"You can also disable items being added to your Recently Watched list from the Preferences menu",
+
+"HistoryClearRecentTitle":"Clear Recently Watched",	
+"HistoryClearRecentSummary":"Remove all items from your Recently Watched list but remember which items you've watched",
+
+"HistoryClearAllTitle":"Reset Viewing History",	
+"HistoryClearAllSummary":"Clears your Recently Watched list and resets all items to be unwatched",
+
+"HistoryRemove":"Remove from Recently Watched",
+
+"HistoryAddToFavourites":"Add to Favourites",
+"HistoryAddToFavouritesItem":"Add to Favourites - %s",
+"HistoryFavouriteAddedTitle":"Item added to Favourites",
+"HistoryFavouriteAddedMsg":"%s has been added to your favourites.",
+
+//========= Favourites Menu ============
+"FavouritesTitle":"Favourites",
+"FavouritesTitleNewOnly":"Favourites (New Items)",
+
+"FavouritesActionTitle":"Favourites Actions...",
+
+"FavouritesShowAll":"View All Favourites",
+"FavouritesShowNew":"View New Items Only",
+
+"FavouritesClearTitle":"Clear Favourites",
+
+"FavouritesRemove":"Remove from Favourites",
+"FavouritesNewItemNotifyTurnOn":"Check for new unwatched items",
+"FavouritesNewItemNotifyTurnOff":"Stop checking for new items",
+
+"FavouritesNewItemNotifySummaryNew":"New unwatched items were found for this favourite on %s.",
+"FavouritesNewItemNotifySummaryNoNew":"Plugin will regularly check to see if new unwatched items are available.\nLast check time: %s",
+
+// =========== TV Season Menu =============
+"TVSeasonActionTitle":"TV Show Actions...",
+
+// ======== TV Season Shows Menu ==========
+"TVSeasonEpsActionTitle":"Season Actions...",
+
+// =========== Source Menu ================
+"ItemSourceActionTitle":"Item Actions...",
+"ItemSourceActionMarkAsWatchedHeader":"Item Marked as Watched",
+"ItemSourceActionMarkAsWatchedMessage":"%s has been marked as watched",
+"ItemSourceActionMarkAsUnwatchedHeader":"Item Marked as Unwatched",
+"ItemSourceActionMarkAsUnwatchedMessage":"%s has been marked as Unwatched",
+
+}
