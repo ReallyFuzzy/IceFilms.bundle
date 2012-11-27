@@ -1049,7 +1049,7 @@ def SearchResultsMenu(query, type, parent_name=None):
 		func_name = SourcesMenu
 		
 	for item in Parsing.GetSearchResults(query=query, type=type):
-		title = item.title + " (" + item.releasedate + ")" if item.releasedate else item.title
+		title = item.title + " (" + str(item.year) + ")" if item.year else item.title
 		oc.add(
 			DirectoryObject(
 				key=Callback(func_name, mediainfo=item, url=item.id, path=path, parent_name=oc.title2),
