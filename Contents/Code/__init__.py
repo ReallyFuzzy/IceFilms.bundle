@@ -923,10 +923,16 @@ def SourcesAdditionalMenu(mediainfo):
 	if (mediainfo.type == 'movies'):
 		url += "/" + mediainfo.title
 	else:
-		url += "/" + mediainfo.show_name + "/" + str(mediainfo.season) + "/" + str(mediainfo.ep_num)
+		url += "/" + urllib.quote(mediainfo.show_name) + "/" + str(mediainfo.season) + "/" + str(mediainfo.ep_num)
 	
 	#Log(url)
-	return Redirect(url)
+	
+	# Can't use Redirect as it doesn't seem to be supported by some clients <sigh>
+	# So get the data for them instead by manually doing the redirect ourselves.
+	request = urllib2.Request(url)
+	request.add_header('Referer', "http://localhost:32400" + VIDEO_PREFIX + "/")
+	return urllib2.urlopen(request).read()
+
 	
 ####################################################################################################
 
@@ -2002,7 +2008,7 @@ def GetAdditionalSources(imdb_id, title, year=None, season_num=None, ep_num=None
 								season=season_num,
 								ep_num=ep_num
 							),
-							need_meta_retrieve(mediainfo.type)
+							need_meta_retrieve(type)
 						)
 						
 						oc =  SourcesMenu(mediainfo, ep[0]['ep_url'], external_caller=caller)
