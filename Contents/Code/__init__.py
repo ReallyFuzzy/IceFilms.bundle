@@ -921,7 +921,7 @@ def SourcesAdditionalMenu(mediainfo):
 	url = "http://localhost:32400/video/" + Site.ADDITIONAL_SOURCES[0] + "/sources/" + mediainfo.id
 	
 	if (mediainfo.type == 'movies'):
-		url += "/" + mediainfo.title
+		url += "/" + urllib.quote(mediainfo.title)
 	else:
 		url += "/" + urllib.quote(mediainfo.show_name) + "/" + str(mediainfo.season) + "/" + str(mediainfo.ep_num)
 	
