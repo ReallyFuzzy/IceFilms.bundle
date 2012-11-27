@@ -2069,7 +2069,7 @@ def PlaybackCaller(url):
 	# See if the URL being played is on our recently browsed list.
 	caller =  cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY)).getCaller(decoded_url)
 	if (not caller):
-		caller = VIDEO_PREFIX
+		caller = None
 	
 	#Log(caller)
 	

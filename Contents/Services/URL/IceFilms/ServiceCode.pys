@@ -160,7 +160,9 @@ def PlaybackStarted(url):
 			request = urllib2.Request(
 				PLUGIN_URL + "/playback/caller/" + String.Encode(url)
 			)
-			caller = JSON.ObjectFromString(urllib2.urlopen(request).read())['caller']
+			response = JSON.ObjectFromString(urllib2.urlopen(request).read())
+			if (response['caller']):
+				caller = response['caller']
 		except Exception, ex:
 			pass
 		
