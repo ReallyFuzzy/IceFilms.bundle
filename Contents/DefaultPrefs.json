@@ -36,7 +36,7 @@
     {
         "id": "favourite_notify_email_test",
         "type": "bool",
-        "label": "Send Test Email",
+        "label": "Show 'Send Test Email'",
         "default": "false"
     },
     {
