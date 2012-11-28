@@ -59,6 +59,7 @@ BROWSED_ITEMS_KEY = "RECENT_BROWSED_ITEMS"
 WATCHED_ITEMS_KEY = "USER_VIEWING_HISTORY"
 FAVOURITE_ITEMS_KEY = "FAVOURITE_ITEMS"
 ADDITIONAL_SOURCES_KEY = "ADDITIONAL_SOURCES"
+LAST_USAGE_TIME_KEY = "LAST_USAGE_TIME"
 
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22'
 	
@@ -97,10 +98,14 @@ def Start():
 
 	if hasattr(Site, 'Start'):
 		Site.Start()
-		
-	if (Prefs['versiontracking'] == True):
-		Thread.Create(VersionTrack)
 	
+	# Assign default values for stuff we may need.
+	if (not Dict[LAST_USAGE_TIME_KEY]):
+		Dict[LAST_USAGE_TIME_KEY] = datetime(1900,1,1)
+	
+	# Do a bit of housekeeping... See if any plugins that support our additional
+	# sources functionality are present on this sytem, start a new item check in
+	# favourites and log version usage.
 	Thread.Create(StartFavouritesCheck)
 	Thread.Create(CheckAdditionalSources, sources=Site.ADDITIONAL_SOURCES)
 
@@ -111,7 +116,7 @@ def Start():
 def ValidatePrefs():
 
 	if (Prefs['favourite_notify_email']):
-		# Enable cron if we have favourites already being checked.
+		# Enable cron if we have favourites which are already being checked.
 		if (len([x for x in load_favourite_items().get() if x.new_item_check]) > 0):
 			Utils.add_favourites_cron(Platform.OS, NAME, VIDEO_PREFIX)				
 	else:
@@ -216,7 +221,13 @@ def VideoMainMenu():
 			
 	except Exception, ex:
 		Log("******** Error retrieving and processing latest version information. Exception is:\n" + str(ex))
-		
+	
+	# This is a user requested menu which the user must go through when using / launching
+	# the plugin. If it's been more than 3 hours since we last saw the user, assume
+	# it's a new session and add it to the stats if needed.
+	if (datetime.utcnow() - Dict[LAST_USAGE_TIME_KEY]) > timedelta(hours=3):
+		Thread.Create(VersionTrack)
+	
 	return oc
 	
 
@@ -271,6 +282,8 @@ def UpdateMenu():
 
 def TypeMenu(type=None, genre=None, path=[], parent_name=None):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	type_desc = "Movies"
 	if (type == "tv"):
 		type_desc = "TV Shows"
@@ -384,6 +397,8 @@ def TypeMenu(type=None, genre=None, path=[], parent_name=None):
 
 def AZListMenu(type=None, genre=None, path=None, parent_name=None, thumb=None):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	oc = ObjectContainer(view_group="InfoList", title1=parent_name, title2="A-Z")
 	azList = ['123','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']
 	
@@ -414,6 +429,8 @@ def AZListMenu(type=None, genre=None, path=None, parent_name=None, thumb=None):
 
 def GenreMenu(type=None, path=None, parent_name=None):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	oc = ObjectContainer(no_cache=True, title1=parent_name,title2="Genre", view_group="InfoList")
 		
 	for genre in Site.GetGenres():
@@ -450,6 +467,8 @@ def ItemsMenu(
 	section_name="", start_page=0, path=[], parent_name=None
 ):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	num_pages = 2
 	replace_parent = False
 	title2 = section_name
@@ -547,6 +566,8 @@ def ItemsMenu(
 ####################################################################################################
 def TVSeasonMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	# Clean up mediainfo that's been passed in from favourites as it will be
 	# keyed for a specifc ep and not a show.
 	mediainfo.season = None
@@ -691,6 +712,8 @@ def TVSeasonActionWatch(item_name=None, mediainfo=None, path=None, action="watch
 ####################################################################################################
 def TVSeasonEpsMenu(mediainfo=None, season_url=None,item_name=None, path=[], parent_name=None):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	# Clean up media info that's been passed in from favourites / recently watched.
 	mediainfo.ep_num = None
 	
@@ -858,6 +881,8 @@ def TVSeasonEpsActionWatch(item_name=None, items=None, action="watch"):
 # SOURCES MENUS
 ####################################################################################################
 def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None, external_caller=None):
+	
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
 	
 	if (item_name is None):
 		item_name = mediainfo.title
@@ -1066,6 +1091,8 @@ def SourcesActionWatch(item_name=None, items=None, action="watch"):
 
 def SearchResultsMenu(query, type, parent_name=None):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	oc = ObjectContainer(no_cache=True, view_group = "InfoList", title1=parent_name, title2="Search (" + query + ")")
 
 	path = [ { 'elem':'Search (' + query + ')', 'query': query }]
@@ -1098,6 +1125,8 @@ def SearchResultsMenu(query, type, parent_name=None):
 # HISTORY MENU
 ####################################################################################################
 def HistoryMenu(parent_name=None):
+
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
 
 	oc = ObjectContainer(no_cache=True, view_group="InfoList", title1=parent_name, title2=L("HistoryTitle"))
 	
@@ -1395,6 +1424,8 @@ def HistoryAddToFavouritesMenu(mediainfo, path, parent_name):
 ####################################################################################################
 def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_parent=False):
 
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
 	oc = ObjectContainer(
 		no_cache=True, view_group="InfoList", replace_parent=replace_parent,
 		title1=parent_name, title2=L("FavouritesTitle")
@@ -2213,12 +2244,15 @@ def PlaybackStarted(id, season_num=None, ep_num=None):
 
 def VersionTrack():
 
-	try:
-		request = urllib2.Request(VERSION_URLS[VERSION])
-		request.add_header('User-agent', '-')	
-		response = urllib2.urlopen(request)
-	except:
-		pass
+	if (Prefs['versiontracking']):
+		try:
+			# Has there been a 3 hour idle window since we were last called?
+			# If so, assume this is a new user session and count it towards stats.
+			request = urllib2.Request(VERSION_URLS[VERSION])
+			request.add_header('User-agent', '-')	
+			response = urllib2.urlopen(request)
+		except:
+			pass
 
 ####################################################################################################
 def CheckAdditionalSources(sources):
