@@ -1334,7 +1334,11 @@ def HistoryRemoveFromRecent(mediainfo, path, parent_name):
 
 	hist = load_watched_items()
 	hist.remove_from_recent(mediainfo, Prefs['watched_grouping'])
-	save_watched_items(hist)			
+	save_watched_items(hist)
+	
+	oc = HistoryMenu(parent_name=parent_name)
+	oc.replace_parent = True
+	return oc
 	
 ####################################################################################################
 
