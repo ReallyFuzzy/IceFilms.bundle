@@ -63,6 +63,12 @@ def GetItems(type, genre = None, sort = None, alpha = None, pages = 5, start_pag
 		# Extract out title
 		res.title = Utils.decode_htmlentities(str(title_elem.string))
 		
+		match = re.search("(.*)\((\d*)\)", res.title)
+		
+		if (match):
+			res.title = match.group(1).strip()
+			res.year = int(match.group(2).strip())
+		
 		# Extract out id if available, otherwise, just store the item's URL.
 		match = id_reg_ex.search(title_elem['href'])
 		#Log(match)

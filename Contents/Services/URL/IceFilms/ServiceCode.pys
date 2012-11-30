@@ -127,6 +127,26 @@ def PlayVideo(url):
 	
 	media_objects = URLService.MediaObjectsForURL(provider_url)
 	
+	# !!!Complete Hack Alert!!!
+	# Roku client doesn't handle multiple indirect directives.
+	# So, resolve them on it's behalf in the dumbest way possible.
+	# This makes so many assumptions, it's safe to assume that this
+	# will break in a horrible way at some point.
+	if media_objects[0].parts[0].key.find("indirect=1") >= 0:
+	
+		part_url = media_objects[0].parts[0].key
+
+		# Putlocker / Sockshare needs to know the client platform so it can do magic.
+		request = urllib2.Request(
+			PLEX_URL + part_url,
+			None, 
+			{ 'X-Plex-Client-Platform':Client.Platform }
+		)
+		response = urllib2.urlopen(request).read()
+
+		response_obj = XML.ElementFromString(response)		
+		media_objects[0].parts[0].key = response_obj.xpath("//Part/@key")[0]
+		
 	if (len(media_objects) > 0):
 		PlaybackStarted(url=url)
 		
@@ -144,42 +164,13 @@ def LogProviderError(msg="", ex=None):
 	return []
 	
 ##################################################################################################
-# LMWT Plugin specific helper methods.
+# Plugin specific helper methods.
 def PlaybackStarted(url):
 	
 	# Bad things can happen here. Let's try to be neat though....
 	try:
-	
-		caller = "icefilms"
-		
-		# We may be playing the video on behalf of another plugin. In that case, we'll need to
-		# call that plugin's PlaybackStarted method insted of our own.
-		#
-		# Check if this is the case by seeing who originally called for the source listing.
-		try:
-			request = urllib2.Request(
-				PLUGIN_URL + "/playback/caller/" + String.Encode(url)
-			)
-			response = JSON.ObjectFromString(urllib2.urlopen(request).read())
-			if (response['caller']):
-				caller = response['caller']
-		except Exception, ex:
-			pass
-		
-		# Get the media info object that was built by this plugin when generating the
-		#Êsource listing. We'll use the info in that to talk to whatever plugin we need to
-		# tell the item has started playing. 
-		request = urllib2.Request(PLUGIN_URL + "/mediainfo/" + String.Encode(url))
-		mediainfo = JSON.ObjectFromString(urllib2.urlopen(request).read())
-		
-		# Use the information from the mediainfo to call the PlaybackStarted method of
-		# whatever plugin requested this.
-		url = PLEX_URL + '/video/' + caller + "/playback/%s" % mediainfo['id']		
-		if (mediainfo['ep_num']):
-			url += "/" + str(mediainfo['season']) + "/" + str(mediainfo['ep_num'])
-		Log(url)
-		
-		request = urllib2.Request(url)
+		#Log(PLUGIN_URL + "/playback/" + String.Encode(url))
+		request = urllib2.Request(PLUGIN_URL + "/playback/" + String.Encode(url))
 		response = urllib2.urlopen(request)
 		
 	except Exception, ex:

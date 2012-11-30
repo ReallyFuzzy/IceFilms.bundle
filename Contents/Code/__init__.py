@@ -62,7 +62,10 @@ ADDITIONAL_SOURCES_KEY = "ADDITIONAL_SOURCES"
 LAST_USAGE_TIME_KEY = "LAST_USAGE_TIME"
 
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22'
-	
+
+PLEX_URL = "http://127.0.0.1:32400"
+PLUGIN_URL = PLEX_URL + VIDEO_PREFIX
+
 ####################################################################################################
 
 def Start():
@@ -104,8 +107,8 @@ def Start():
 		Dict[LAST_USAGE_TIME_KEY] = datetime(1900,1,1)
 	
 	# Do a bit of housekeeping... See if any plugins that support our additional
-	# sources functionality are present on this sytem, start a new item check in
-	# favourites and log version usage.
+	# sources functionality are present on this sytem and start a new item check in
+	# favourites.
 	Thread.Create(StartFavouritesCheck)
 	Thread.Create(CheckAdditionalSources, sources=Site.ADDITIONAL_SOURCES)
 
@@ -522,6 +525,10 @@ def ItemsMenu(
 			else:
 				indicator =  u"\u00F8" + "  "
 		
+		title = item.title
+		if (item.year):
+			title = title + " (" + str(item.year) + ")"
+			
 		oc.add(
 			DirectoryObject(
 				key=Callback(
@@ -531,10 +538,10 @@ def ItemsMenu(
 					path=path,
 					parent_name=oc.title2,
 				),
-				title=indicator + item.title,
+				title=indicator + title,
 				tagline="",
 				summary="",
-				thumb= item.poster,
+				thumb=item.poster,
 				art="",
 			)
 		)
@@ -578,8 +585,12 @@ def TVSeasonMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=
 		
 	if (mediainfo.show_name is None and mediainfo.title is not None):
 		mediainfo.show_name = mediainfo.title
-								
-	oc = ObjectContainer(view_group = "InfoList", title1=parent_name, title2=mediainfo.show_name)
+	
+	title = mediainfo.show_name
+	if (mediainfo.year):
+		title = title + " (" + str(mediainfo.year) + ")"
+		
+	oc = ObjectContainer(view_group = "InfoList", title1=parent_name, title2=title)
 	
 	path = path + [{'elem':mediainfo.show_name, 'show_url':url}]
 	
@@ -886,6 +897,8 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 	
 	if (item_name is None):
 		item_name = mediainfo.title
+		if (mediainfo.year):
+			item_name = item_name + " (" + str(mediainfo.year) + ") "
 	
 	path = path + [ { 'elem': item_name, 'url': url } ]
 	
@@ -917,7 +930,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 	if (not external_caller):
 		oc.add(
 			PopupDirectoryObject(
-				key=Callback(SourcesActionMenu, mediainfo=mediainfo, path=path),
+				key=Callback(SourcesActionMenu, mediainfo=mediainfo2, path=path),
 				title=L("ItemSourceActionTitle"),
 				summary=mediainfo2.summary,
 				art=mediainfo2.background,
@@ -944,7 +957,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 			)
 		)
 		
-	if len(oc.objects) == 2:
+	if len(providerURLs) == 0:
 		oc.header = "No Enabled Sources Found"
 		oc.message = ""
 	else:
@@ -984,13 +997,22 @@ def SourcesAdditionalMenu(mediainfo):
 	request.add_header('Referer', "http://localhost:32400" + VIDEO_PREFIX + "/")
 	return urllib2.urlopen(request).read()
 
-	
+
 ####################################################################################################
 
 def SourcesActionMenu(mediainfo, path):
 
 	oc = ObjectContainer(view_group="InfoList", title1="", title2="")
 	
+	if (mediainfo.type == "movies"):
+	
+		oc.add(
+			DirectoryObject(
+				key=Callback(SourcesActionTrailerMenu, mediainfo=mediainfo, path=path),
+				title="View Trailer",
+			)
+	)
+
 	if (
 		Prefs['watched_indicator'] == 'All' 
 		or ( mediainfo.type == 'tv' and Prefs['watched_indicator'] != 'Disabled')
@@ -1031,6 +1053,55 @@ def SourcesActionMenu(mediainfo, path):
 		
 	return oc
 
+####################################################################################################
+
+def SourcesActionTrailerMenu(mediainfo, path):
+
+	try:
+		result = SearchService.Query(urllib.quote(mediainfo.title), "com.plexapp.plugins.amt", None)
+	except KeyError, ex:
+		return MessageContainer(
+			"'Apple Movie Trailers' plugin not found.",
+			"Please install the 'Apple Movie Trailers' plugin from the Channel Directory to view trailers."
+		)
+		
+	objects = []
+	for object in result.objects:
+		
+		title = object.title
+		match = re.match("(.*) \(.*\)",title)
+		
+		if match:
+			title = match.group(1)
+		
+		if (String.LevenshteinDistance(mediainfo.title.lower(), title.lower()) <= 3):
+			objects.append(object)
+			
+	
+	if (len(objects) == 0):
+		return MessageContainer(
+			"No Trailers Found",
+			"Couldn't find any trailers for this movie.\nMovie Name: " + mediainfo.title
+		)
+	else:
+	
+		# Resort objects so that trailers appear first in the list.
+		objects = sorted(
+			objects, 
+			key=lambda x: "AA" + x.title.replace(" ","") if x.title.lower().find("(trailer") != -1 else x.title
+		)
+			
+		return ObjectContainer(
+			no_cache=True,
+			title1=mediainfo.title,
+			title2="Trailers",
+			objects = objects,
+			art=mediainfo.background,
+		)
+		
+	return oc
+	
+	
 ####################################################################################################
 
 def SourcesActionWatch(item_name=None, items=None, action="watch"):
@@ -1879,7 +1950,24 @@ def NoOpMenu():
 @route(VIDEO_PREFIX + '/favourites/check')
 def StartFavouritesCheck():
 
-	CheckForNewItemsInFavourites()
+	# Only launch a singe instance of this.
+	#
+	# This is important as when this get called via cron it's possible that the plugin
+	# will need to be started. If that happens then a call to this will be launched on a 
+	# a separate thread from the plugin's start method. This will then get processed at the
+	# same time as the cron's call on the main thread leading to potentially doubled up emails.
+	lock = Thread.Lock("FAVS_CHECK" + VIDEO_PREFIX)
+	
+	if (lock.acquire(False)):
+		try:
+			Log("Checking for favorites.")
+			CheckForNewItemsInFavourites()
+		finally:
+			lock.release()
+	else:
+		Log("Not checking for favourites as someone else already is.")
+	
+	Log("Done")
 	return ""
 
 
@@ -2122,58 +2210,89 @@ def MediaInfoLookup(url):
 	#Log(decoded_url)
 	
 	# See if the URL being played is on our recently browsed list.
-	info = cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY)).getByURL(decoded_url)
+	item = cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY)).getByURL(decoded_url)
 
-	if (info is None):
+	if (item is None):
 		Log("****** ERROR: Watching Item which hasn't been browsed to")
 		return ""
 	
 	# Return the media info that was stored in the recently browsed item.
-	return demjson.encode(info[0])
+	return demjson.encode(item[0])
 
 
 ####################################################################################################
-#
-@route(VIDEO_PREFIX + '/playback/caller/{url}')
-def PlaybackCaller(url):
+# LMWT Plugin specific helper methods.
+
+@route(VIDEO_PREFIX + '/playback/{url}')
+def PlaybackStarted(url):
 
 	"""
-	Return the name of the video plugin that was used to generate the source menu for the
-	passed in provider video URL. 
-	
-	This should be used internally by this plugin to construct the URL to call when playback
-	of one of its sources is started. This is needed for when the item being played wasn't 
-	accessed directly via this plugin but instead was accessed via the additional sources menu
-	of another plugin.
+	Method that gets called by our URL Services to let us know playback has started
 	"""
 	
-	# Get clean copy of URL user has played.
-	decoded_url = String.Decode(str(url))
-	#Log(decoded_url)
-	
-	# See if the URL being played is on our recently browsed list.
-	caller =  cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY)).getCaller(decoded_url)
-	if (not caller):
-		caller = None
-	
-	#Log(caller)
-	
-	return JSON.StringFromObject({'caller': caller})
-	
+	# Many bad things can happen here...
+	try:
 
+		# Get clean copy of URL user has played.
+		decoded_url = String.Decode(str(url))
+		#Log(decoded_url)
+
+		# Get our recently browsed items and try to find the item the user has just played.	
+		browsed_items =  cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY))
+		item = browsed_items.getByURL(decoded_url)
+		
+		if (item is None):
+			Log("****** ERROR: Watching Item which hasn't been browsed to")
+			return ""
+		
+		# We may just be an additional source and we're playing this on behalf of another
+		# plugin. In that case, let that plugin know playback has started.
+		caller = browsed_items.getCaller(decoded_url)
+		
+		if (not caller):
+		
+			# We've started playback for ourselves. Do normal processing.
+			#
+			# Nothing to do. User doesn't want any tracking.
+			if (Prefs['watched_indicator'] == 'Disabled' and Prefs['watched_amount'] == 'Disabled'):
+				return ""
+				
+			# Process and mark as watched.
+			PlaybackMarkWatched(item[0], item[1])
+
+		else:
+		
+			# We've started playback on behald of someone else. Call their playbackStarted
+			# method.
+			
+			mediainfo = item[0]
+				
+			# Use the information from the mediainfo to call the PlaybackStarted method of
+			# whatever plugin requested this.
+			url = PLEX_URL + '/video/%s/playback/external/%s' % (caller, mediainfo['id'])
+			if (mediainfo['ep_num']):
+				url += "/%s/%s" % (str(mediainfo['season']), str(mediainfo['ep_num']))
+
+			Log(url)
+		
+			request = urllib2.Request(url)
+			response = urllib2.urlopen(request)
+		
+	except Exception, ex:
+		Log.Exception("Error whilst trying to mark item as played")
+		pass
+		
+	return ""
+		
 ####################################################################################################
-#
-@route(VIDEO_PREFIX + '/playback/{id}')
-@route(VIDEO_PREFIX + '/playback/{id}/{season_num}/{ep_num}')
-def PlaybackStarted(id, season_num=None, ep_num=None):
+
+@route(VIDEO_PREFIX + '/playback/external/{id}')
+@route(VIDEO_PREFIX + '/playback/external/{id}/{season_num}/{ep_num}')
+def PlaybackStartedExternal(id, season_num=None, ep_num=None):
 
 	"""
-	Handle the fact that playback of a source has started.
-	
-	Note that the URL of the source isn't passed back as the source isn't guaranteed to be
-	one of this plugin's and could instead have come from an additional source for which we
-	don't know the URLs. So, instead, IDs which should match up between both systems are passed
-	back to this
+	Handle the fact that playback of a source has been started by an Additonal Sources
+	plugin.
 	"""
 	
 	season_num = int(season_num) if season_num else None
@@ -2193,10 +2312,13 @@ def PlaybackStarted(id, season_num=None, ep_num=None):
 		Log("****** ERROR: Watching Item which hasn't been browsed to")
 		return ""
 	
-	# Get the bits of info out of the recently browsed item.
-	mediainfo = info[0]
-	path = info[1]
+	# Process and mark as watched.
+	PlaybackMarkWatched(item[0], item[1])
 
+####################################################################################################
+
+def PlaybackMarkWatched(mediainfo, path):
+	
 	# Does user want to keep track of watched items?
 	if (Prefs['watched_indicator'] != 'Disabled'):
 		# Load up viewing history, and add item to it.
