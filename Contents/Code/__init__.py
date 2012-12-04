@@ -844,10 +844,7 @@ def TVSeasonEpsMenu(mediainfo=None, season_url=None,item_name=None, path=[], par
 		indicator = ''
 		if (hist is not None):
 			watched = hist.has_been_watched(item['ep_url'])
-			if (watched):
-				indicator = '    '
-			else:
-				indicator =  u"\u00F8" + "  "
+			indicator = '    ' if (watched) else u"\u00F8" + "  "
 		
 		oc.add(
 			DirectoryObject(
@@ -1594,7 +1591,7 @@ def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_par
 			if (not new_item and new_items_only):
 				continue
 
-			new_item_label = " - New Items" if new_item else ""
+			new_item_label = u"\u00F8" + "  " if (new_item) else '    '
 			
 			oc.add(
 				DirectoryObject(
@@ -1604,7 +1601,7 @@ def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_par
 						new_items_only=new_items_only,
 						label=existing_label
 					),
-					title=existing_label + new_item_label + " >",
+					title=new_item_label + existing_label + " >",
 					thumb=R(TAG_ICON % TAG_ICON_COLOUR[cnt])
 				)
 			)
@@ -1629,8 +1626,9 @@ def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_par
 		
 		title = mediainfo.title
 		if (item.new_item):
-			title = title + " - New Item(s)"
+			title =  u"\u00F8" + "  " + title
 		else:
+			title =  '    ' + title
 			if (new_items_only):
 				continue
 				
