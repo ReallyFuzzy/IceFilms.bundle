@@ -1109,6 +1109,11 @@ def SourcesActionTrailerMenu(mediainfo, path):
 			"'Apple Movie Trailers' plugin not found.",
 			"Please install the 'Apple Movie Trailers' plugin from the Channel Directory to view trailers."
 		)
+	except Exception, ex:
+		return MessageContainer(
+			"No Trailers Found",
+			"Couldn't find any trailers for this movie.\nMovie Name: " + mediainfo.title
+		)
 		
 	objects = []
 	for object in result.objects:
