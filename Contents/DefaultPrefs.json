@@ -28,6 +28,12 @@
         "default": "Alphabetical"
     },
     {
+        "id": "favourite_add_labels",
+        "type": "bool",
+        "label": "When adding item to favourites, also add labels:",
+        "default": "false"
+    },
+    {
         "id": "favourite_notify_email",
         "type": "text",
         "label": "Email to notify when new Favourites are found:",

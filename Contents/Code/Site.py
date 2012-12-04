@@ -5,6 +5,7 @@ Note that site specific parsing lives in Parsing.py
 """
 
 VIDEO_PREFIX = "/video/icefilms"
+NAME="IceFilms"
 
 LATEST_VERSION_URL = 'http://bit.ly/xjrEcV'
 

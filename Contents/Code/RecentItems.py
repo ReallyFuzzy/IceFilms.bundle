@@ -1,5 +1,6 @@
 import datetime
 import cerealizer
+from sets import Set
 
 class BrowsedItems(object):
 
@@ -196,9 +197,13 @@ class ViewedItems(object):
 			self.watched_items.remove(elem)
 				
 	def has_been_watched(self, url):
-	
-		result = [elem for elem in self.watched_items if url == elem[1]]
-		return(len(result) > 0)
+
+		if (isinstance(url, basestring)):
+			url_set = set([url])
+		else:
+			url_set = set(url)
+
+		return url_set.issubset([x[1] for x in self.watched_items])
 	
 	def __len__(self):
 	

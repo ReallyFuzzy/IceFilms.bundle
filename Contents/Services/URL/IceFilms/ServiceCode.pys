@@ -29,11 +29,21 @@ PLUGIN_URL = PLEX_URL + "/video/icefilms"
 
 def NormalizeURL(url):
 
+	#Log("*********** In IceFilms normalizeURL")
+
+	# Deal with special providerInfo URL built up by plugin to return
+	# info about this provider. For all other normal URLs, do nothing. 
+	if ("providerinfo.icefilms" in url):
+		return url + "?sources=true"
+		
 	return url
 	
 def MetadataObjectForURL(url):
 
 	#Log('In MetadataObjectForURL for IceFilms (' + url + ')')
+	
+	if ("providerinfo" in url):
+		raise Exception("providerinfo URL supported only for NormalizeURL")
 	
 	video = None
 	
@@ -76,6 +86,9 @@ def MetadataObjectForURL(url):
 	return video
 
 def MediaObjectsForURL(url):
+
+	if ("providerinfo" in url):
+		raise Exception("providerinfo URL supported only for NormalizeURL")
 	
 	# Delay working out the real provider's URL until video is picked.
 	# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id

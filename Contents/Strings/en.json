@@ -1,6 +1,5 @@
 {
-
-"Title": "IceFilms",
+"Title":"Let Me Watch This",
 "NoOpTitle":"----------------------",
 
 //================ Main Menu ===============
@@ -58,7 +57,7 @@
 "FavouritesNewItemNotifyTurnOff":"Stop checking for new items",
 
 "FavouritesNewItemNotifySummaryNew":"New unwatched items were found for this favourite on %s.",
-"FavouritesNewItemNotifySummaryNoNew":"Plugin will regularly check to see if new unwatched items are available.\nLast check time: %s",
+"FavouritesNewItemNotifySummaryNoNew":"Plugin will regularly check to see if new unwatched items are available.\nLast checked: %s\nNext Check: %s (at earliest)",
 
 // =========== TV Season Menu =============
 "TVSeasonActionTitle":"TV Show Actions...",

@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from urllib import quote_plus
 
-from tvdb_api.tvdb_exceptions import tvdb_shownotfound
+from tvdb_api.tvdb_exceptions import tvdb_shownotfound, tvdb_attributenotfound
 from tvdb_api.tvdb_api import Tvdb
 
 MOVIEDB_URL = "http://api.themoviedb.org/2.1/Movie.imdbLookup/en/xml/e3dde0b795a9eca51531ce9f8e688ff6/"
@@ -120,47 +120,59 @@ class TVDBProvider(object):
 		#Log("In TVDBProvider.RetrieveItemFromProvider with args: " + str(kwargs))
 		mediaInfo = MediaInfo()
 		mediaInfo.type = "tv"
-		mediaInfo.id = kwargs['imdb_id']		
 			
 		try:
 								
 			t = Tvdb(banners=True)
+			show = None
 			
-			try:
-				show = t[kwargs['imdb_id']]
-			except tvdb_shownotfound, ex:
-				if ('show_name' in kwargs):
+			if ('imdb_id' in kwargs and kwargs['imdb_id']):
+				try:
+					show = t[kwargs['imdb_id']]
+				except tvdb_shownotfound, ex:
+					pass
+					
+			if (not show and 'show_name' in kwargs and kwargs['show_name']):
+				try:
 					#Log(kwargs['show_name'])
 					show = t[kwargs['show_name']]
 					if (show['seriesname'].lower() != kwargs['show_name'].lower()):
-						raise ex
-				else:
-					raise ex
+						show = None
+				except tvdb_shownotfound, ex:
+					pass
+					
+			if (not show):
+				raisetvdb_shownotfound()
 			
+			try:
+				mediaInfo.id = show['imdb_id']
+			except tvdb_attributenotfound, ex:
+				pass
+				
 			mediaInfo.show_name = show['seriesname']
 			mediaInfo.duration = int(show['runtime']) * 60 * 1000
 			mediaInfo.background = show['fanart']
 			mediaInfo.poster = show['poster']
 			mediaInfo.summary = show['overview']
-			
+						
 			if ('season' not in kwargs or kwargs['season'] is None):
 			
 				seasons = {}
 				
 				mediaInfo.title = mediaInfo.show_name
 				
-				try:
-					for key in show.keys():
+				for key in show.keys():
+					try:
 						#Log("Looking for poster for season:" + str(key))
 						season_posters = [x for x in show['_banners']['season']['season'].values() if x['season'] == str(key)]
 						season_posters = sorted(season_posters, key=lambda x: x['rating'] if 'rating' in x else '0')
 						if len(season_posters) > 0:
 							seasons[key] = season_posters[-1]['_bannerpath']
+					except Exception,ex:
+						Log.Exception('Error while getting poster for season: ' + str(key))
 					
-					#Log("Found Season Poster:" + str(seasons))
-					mediaInfo.season_posters = seasons		
-				except Exception,ex:
-					Log.Exception(ex)
+				#Log("Found Season Poster:" + str(seasons))
+				mediaInfo.season_posters = seasons		
 					
 			else:
 			
@@ -179,7 +191,7 @@ class TVDBProvider(object):
 					if (len(season_posters) > 0):
 						mediaInfo.poster = sorted(season_posters, key=lambda x: x['rating'] if 'rating' in x else '0')[-1]['_bannerpath']
 				except Exception, ex:
-					Log.Exception(ex)
+					Log.Exception("Couldn't find poster for season")
 				
 				if ('ep_num' not in kwargs or kwargs['ep_num'] is None):
 					episodes = {}

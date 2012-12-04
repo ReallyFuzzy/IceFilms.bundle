@@ -109,17 +109,22 @@ def GetTVSeasons(url):
 
 ####################################################################################################
 
-def GetTVSeasonEps(url):
+def GetTVSeasonEps(url, no_cache=False):
 
-	eps = []
-	soup = BeautifulSoup(HTTP.Request(ICEFILMS_URL + url).content)
+	cacheTime = 0 if no_cache else HTTP.CacheTime
 	
-	# Extract out the season name from the URL.
-	seasonName = re.search("\#(.*)", url).group(1)
+	eps = []
+	soup = BeautifulSoup(HTTP.Request(ICEFILMS_URL + url, cacheTime=cacheTime).content)
+	
+	# Extract out the season name from the URL if present.
+	seasonName = None
+	match = re.search("\#(.*)", url)
+	if (match):
+		seasonName = match.group(1)
 	
 	for item in soup.find("span", { 'class' : 'list' }).findAll('h3'):
 	
-		if (item.find(text=True) ==  seasonName):
+		if (not seasonName or item.find(text=True) ==  seasonName):
 		
 			tag = item.findNextSibling()
 			
