@@ -1996,7 +1996,7 @@ def FavouritesNotifyMenu(mediainfo=None):
 			url = [v for k,v in fav.path[-1].items() if (k == 'show_url' or k == 'season_url')][0]
 			
 			# Get URLs of all the shows for the current favourite.
-			fav.items = [show['ep_url'] for show in Parsing.GetTVSeasonEps(url)][:-1]
+			fav.items = [show['ep_url'] for show in Parsing.GetTVSeasonEps(url)]
 			
 			fav.date_last_item_check = datetime.utcnow()
 			fav.date_last_item_found = fav.date_last_item_check
