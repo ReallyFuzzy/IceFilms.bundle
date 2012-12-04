@@ -197,7 +197,7 @@ class FavouriteItem(Object):
 		
 		# If it's been less than 8 days since we found a new item, check every 3 hours at the most.
 		if (last_found_delta.days <= 8):
-			check_delta = 0
+			check_delta = 3
 			
 		# If it's been more than 8 days, but less than 16, check every 8 hours at the most.
 		elif (last_found_delta.days > 8 and last_found_delta.days <= 16):
