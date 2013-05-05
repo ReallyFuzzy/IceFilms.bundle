@@ -24,7 +24,7 @@
 	<string>1.0</string>
 	
 	<key>PlexClientPlatforms</key>
-	<string>MacOSX,Windows,iOS</string>
+	<string>MacOSX,Windows,iOS,LGTV,Android</string>
 	
 	<key>PlexFrameworkVersion</key>
 	<string>2</string>
