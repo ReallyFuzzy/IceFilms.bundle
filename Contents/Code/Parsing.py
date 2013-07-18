@@ -10,6 +10,7 @@ from xgoogle.search import GoogleSearch
 
 import Utils
 
+from NavExObject import CaptchaRequiredObject
 from MetaProviders import DBProvider, MediaInfo
 
 LMWT_SEARCH_URL= "http://www.1channel.ch/index.php"
@@ -226,7 +227,7 @@ def GetItemForSource(mediainfo, source_item):
 	# URL Service (i.e: give it a normal URL it supports and it does the right thing), as well
 	# as supporting a few additional options for this plugin (such as enabling / disabling 
 	# themselves, callbacks to let the plugin know that playback of an item has started....)
-	providerInfoURL = "http://providerinfo." + source_item['provider_name'].lower() + "/?plugin=icefilms"
+	providerInfoURL = "providerinfo://" + source_item['provider_name'].lower() + "/?plugin=icefilms"
 	providerSupported = URLService.ServiceIdentifierForURL(providerInfoURL) is not None
 	
 	if (providerSupported):
@@ -234,8 +235,10 @@ def GetItemForSource(mediainfo, source_item):
 		# See if we need to hide provider by asking the URL service to normalise it's special
 		# providerinfo URL. This should return a URL where the query string is made up of
 		# all the options that URL Service supports in this plugin's little world. 
-		providerVisible =  'visible=true' in URLService.NormalizeURL(providerInfoURL)
-		
+		normalisedProviderInfoURL = URLService.NormalizeURL(providerInfoURL)
+		providerVisible =  'visible=true' in normalisedProviderInfoURL
+		captcha = 'captcha=true' in normalisedProviderInfoURL
+
 		if (providerVisible):
 		
 			# Note the special URL we return here. This a made up URL which doesn't exist in the
@@ -245,6 +248,12 @@ def GetItemForSource(mediainfo, source_item):
 			# This allows us to delay looking up the provider's URL until the user actually 
 			# selects the video and prevents us from hammering IceFilms every time an item's
 			# source are shown.
+			if (captcha):
+				return CaptchaRequiredObject(
+					url="captcha://www.icefilms.info/external/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
+					title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
+				)
+			
 			return VideoClipObject(
 				url="http://www.icefilms.info/external/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
 				title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],

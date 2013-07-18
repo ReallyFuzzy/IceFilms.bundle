@@ -87,22 +87,77 @@ def MetadataObjectForURL(url):
 
 def MediaObjectsForURL(url):
 
+	#Log('In MediaObjectsForURL for IceFilms (' + url + ')')
+	
 	if ("providerinfo" in url):
 		raise Exception("providerinfo URL supported only for NormalizeURL")
 	
-	# Delay working out the real provider's URL until video is picked.
-	# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id
-	ret = []
-	ret.append(
-		MediaObject(
-			parts = [PartObject(key=Callback(PlayVideo, url=url))],
-		)
-	)
 	
-  	return ret
+	if ("captcha://" in url):
+		
+		provider_url = GetSourceFromURL(url)
+		provider_url_parts = urlparse.urlparse(provider_url)
+		return URLService.MediaObjectsForURL(
+			urlparse.ParseResult(
+				"captcha",
+				provider_url_parts.netloc,
+				provider_url_parts.path,
+				provider_url_parts.params,
+				provider_url_parts.query, 
+				provider_url_parts.fragment
+			).geturl()	
+		)
+
+	else:
+	
+		# Delay working out the real provider's URL until video is picked.
+		# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id
+		return [
+			MediaObject(
+				parts = [PartObject(key=Callback(PlayVideo, url=url))],
+			)
+		]
 
 @indirect
 def PlayVideo(url):
+
+	provider_url = GetSourceFromURL(url)
+	
+	media_objects = URLService.MediaObjectsForURL(provider_url)
+	
+	# !!!Complete Hack Alert!!!
+	# Roku client doesn't handle multiple indirect directives.
+	# So, resolve them on it's behalf in the dumbest way possible.
+	# This makes so many assumptions, it's safe to assume that this
+	# will break in a horrible way at some point.
+	if media_objects[0].parts[0].key.find("indirect=1") >= 0:
+	
+		part_url = media_objects[0].parts[0].key
+
+		# Putlocker / Sockshare needs to know the client platform so it can do magic.
+		request = urllib2.Request(
+			PLEX_URL + part_url,
+			None, 
+			{ 'X-Plex-Client-Platform':Client.Platform }
+		)
+		response = urllib2.urlopen(request).read()
+
+		response_obj = XML.ElementFromString(response)		
+		media_objects[0].parts[0].key = response_obj.xpath("//Part/@key")[0]
+		
+	if (len(media_objects) > 0):
+		PlaybackStarted(url=url)
+		
+	return ObjectContainer(
+		objects = [
+			VideoClipObject(
+				items = media_objects
+			)
+		]
+	)
+	
+# Given a plugin specific IceFilms URL, work out final provider URL.
+def GetSourceFromURL(url):
 
 	id_reg_ex = re.compile("/external/(\d+)/(\d+)")
 	match = id_reg_ex.search(url)
@@ -138,38 +193,8 @@ def PlayVideo(url):
 	url_end = page.find('<', url_loc)
 	provider_url = urllib.unquote(page[url_loc:url_end])
 	
-	media_objects = URLService.MediaObjectsForURL(provider_url)
+	return provider_url
 	
-	# !!!Complete Hack Alert!!!
-	# Roku client doesn't handle multiple indirect directives.
-	# So, resolve them on it's behalf in the dumbest way possible.
-	# This makes so many assumptions, it's safe to assume that this
-	# will break in a horrible way at some point.
-	if media_objects[0].parts[0].key.find("indirect=1") >= 0:
-	
-		part_url = media_objects[0].parts[0].key
-
-		# Putlocker / Sockshare needs to know the client platform so it can do magic.
-		request = urllib2.Request(
-			PLEX_URL + part_url,
-			None, 
-			{ 'X-Plex-Client-Platform':Client.Platform }
-		)
-		response = urllib2.urlopen(request).read()
-
-		response_obj = XML.ElementFromString(response)		
-		media_objects[0].parts[0].key = response_obj.xpath("//Part/@key")[0]
-		
-	if (len(media_objects) > 0):
-		PlaybackStarted(url=url)
-		
-	return ObjectContainer(
-		objects = [
-			VideoClipObject(
-				items = media_objects
-			)
-		]
-	)
 	
 def LogProviderError(msg="", ex=None):
 

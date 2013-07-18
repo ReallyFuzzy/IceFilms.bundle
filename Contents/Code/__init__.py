@@ -2,6 +2,7 @@ import re
 import cerealizer
 import urllib
 import urllib2
+import urlparse
 import copy
 import sys
 import base64
@@ -21,6 +22,7 @@ import Notifier
 import Site
 import Utils
 
+from NavExObject    import CaptchaRequiredObject
 from MetaProviders  import DBProvider, MediaInfo
 from RecentItems    import BrowsedItems, ViewedItems
 from Favourites     import FavouriteItems
@@ -958,7 +960,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 		mediainfo2 = mediainfo
 	else:
 		# We did, but do we know more than the meta data provider?
-		# Copy some values across from what we've been passed from LMWT / have built up
+		# Copy some values across from what we've been passed from provider / have built up
 		# as we're navigating if meta provider couldn't find data.
 		if mediainfo2.poster is None:
 			mediainfo2.poster = mediainfo.poster
@@ -987,7 +989,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 	providerURLs = []
 	for source_item in Parsing.GetSources(url):
 	
-		mediaItem = GetItemForSource(mediainfo=mediainfo2, source_item=source_item)
+		mediaItem = GetItemForSource(mediainfo=mediainfo2, source_item=source_item, parent_name=oc.title2)
 		
 		if mediaItem is not None:
 			oc.add(mediaItem)
@@ -1039,7 +1041,7 @@ def SourcesAdditionalMenu(mediainfo):
 	# Can't use Redirect as it doesn't seem to be supported by some clients <sigh>
 	# So get the data for them instead by manually doing the redirect ourselves.
 	request = urllib2.Request(url)
-	request.add_header('Referer', "http://localhost:32400" + VIDEO_PREFIX + "/")
+	request.add_header('Referer', PLUGIN_URL)
 	return urllib2.urlopen(request).read()
 
 
@@ -1210,6 +1212,93 @@ def SourcesActionWatch(item_name=None, items=None, action="watch"):
 	
 ####################################################################################################
 
+def CaptchaRequiredMenu(mediainfo, source_item, url, parent_name=None, replace_parent=False):
+
+	oc = ObjectContainer(view_group="InfoList", user_agent=USER_AGENT, no_history=True, title1=parent_name, title2="Captcha", replace_parent=replace_parent)
+		
+	# Get the media sources for the passed in URL.
+	# This should be made up of two Media Objects:
+	#  1) URL of the CAPTCHA
+	#  2) New URL of the video to play
+	
+	media_objects = URLService.MediaObjectsForURL(url)
+	
+	captcha_URL = media_objects[0].parts[0].key
+	video = media_objects[1].parts[0].key
+	
+	#Log("In captchaRequiredMenu, url: " + url + ", captchaURL:" + captcha_URL + ", video_url: " + video)
+	
+	oc.add(
+		InputDirectoryObject(
+			key=Callback(CaptchaProcessMenu, mediainfo=mediainfo, source_item=source_item, url=url, post_captcha_url=video, parent_name=oc.title1),
+			title="Enter Captcha...",
+			prompt="Enter Captcha to view item.",
+			tagline="This provider requires that you solve this Captcha.",
+			summary="This provider requires that you solve this Captcha.",
+			thumb=PLUGIN_URL + "/proxy?" + urllib.urlencode({'url':captcha_URL}),
+			art=mediainfo.background,
+		)
+	)
+	
+	return oc
+	
+def CaptchaProcessMenu(query, mediainfo, source_item, url, post_captcha_url, parent_name=None):
+
+	oc = ObjectContainer(
+			view_group="InfoList", user_agent=USER_AGENT, no_history=True, replace_parent=True,
+			title1=parent_name, title2="Succesful Captcha"
+	)
+	
+	#Log("In captchaProcessMenu, url: " + url + ", postcaptchaURL:" + post_captcha_url)
+
+	# Some clients (I'm looking at you here iOS) seem to ignore the URLService resolved parts that
+	# get added when this is returned to it and instead re-request the main video clip object's URL
+	# to get it resolved again when the user chooses to play the video. Because Captcha's are a
+	# one go only affair, the second call fails and the URL dosen't end up being resolved. And
+	# then we have a sad client with no videos :( So, instead, manually resolve the post-Captcha
+	# URL here so we can set that in the VideoClipObject.
+	try:
+		video_media = URLService.MediaObjectsForURL(post_captcha_url + "&" + urllib.urlencode({"captcha":query}))
+	except Exception, ex:
+		# Something went wrong. Chances are the Captcha is wrong. Go back and load a new one.
+		# FIXME: Need tighter error checking.
+		return CaptchaRequiredMenu(mediainfo=mediainfo, source_item=source_item, url=url, parent_name=parent_name, replace_parent=True)
+			
+	video_url = video_media[0].parts[0].key
+	
+	vc = VideoClipObject(
+		url=video_url,
+		title="Play Now",
+		summary=mediainfo.summary,
+		art=mediainfo.background,
+		thumb= mediainfo.poster,
+		rating = float(mediainfo.rating) if mediainfo.rating else None,
+		duration=mediainfo.duration,
+		year=mediainfo.year,
+		originally_available_at=mediainfo.releasedate,
+		genres=mediainfo.genres,
+	)
+				
+	oc.add(vc)
+	
+	return oc
+	
+# Utility methods for captchas. All requests in the Captcha cycle must come from the same User-Agent
+# If just let the clients load the Captcha image, we get different User-Agents. Some us libcurl and
+# it'd be possible to force a specific user agent using the "url|extraparams" notation, however some
+# clients use the transcoder which does it's own separate thing and doesn't understand libcurl params.
+# So, instead, we rewrite the Captcha's image URL to pass through this, so we can forcibly set
+# the user-agent.
+#
+# Yup.... This is all rubbish.
+@route(VIDEO_PREFIX + '/proxy')
+def Proxy(url):
+
+	#Log(url)
+	return HTTP.Request(url,headers={'User-Agent':USER_AGENT}).content
+	
+	
+####################################################################################################
 def SearchResultsMenu(query, type, parent_name=None):
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
@@ -2130,12 +2219,23 @@ def CheckForNewItemsInFavourite(favourite, force=False):
 # Params:
 #   mediainfo: A MediaInfo item for the current item being viewed (either a movie or single episode).
 #   item:  A dictionary containing information for the selected source for the item being viewed.
-def GetItemForSource(mediainfo, source_item):
+def GetItemForSource(mediainfo, source_item, parent_name):
 	
 	media_item = Parsing.GetItemForSource(mediainfo, source_item)
 	
 	if media_item is not None:
-		return media_item
+	
+		if (isinstance(media_item,CaptchaRequiredObject)):
+		
+			return DirectoryObject(
+				key = Callback(CaptchaRequiredMenu, mediainfo=mediainfo, source_item=source_item, url=media_item.url, parent_name=parent_name),
+				title = media_item.title + " (Captcha)",
+				summary= mediainfo.summary,
+				art=mediainfo.background,
+				thumb= mediainfo.poster,
+			)
+		else:
+			return media_item
 		
 	# The only way we can get down here is if the provider wasn't supported or
 	# the provider was supported but not visible. Maybe user still wants to see them?
