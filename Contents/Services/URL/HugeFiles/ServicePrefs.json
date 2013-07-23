@@ -1,0 +1,1 @@
+[	{		"id": "show_hugefiles", "label": "HugeFiles",		"type": "bool", "default": "true",	},]
