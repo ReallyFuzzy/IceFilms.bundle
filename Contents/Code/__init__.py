@@ -51,6 +51,7 @@ PREFS_ICON = 'icon-prefs.png'
 SEARCH_ICON='icon-search.png'
 MOVIE_ICON='icon-movie.png'
 TV_ICON='icon-tv.png'
+ADDITIONAL_SOURCES_ICON='icon-additional-sources.png'
 STANDUP_ICON='icon-standup.png'
 GENRE_BASE='icon-genre'
 GENRE_ICON=GENRE_BASE + '.png'
@@ -1001,6 +1002,8 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 			DirectoryObject(
 				key=Callback(SourcesAdditionalMenu, mediainfo=mediainfo2),
 				title="Additional Sources...",
+				#art=mediainfo2.background,
+				thumb=R(ADDITIONAL_SOURCES_ICON),
 			)
 		)
 		
@@ -1105,7 +1108,7 @@ def SourcesActionMenu(mediainfo, path):
 def SourcesActionTrailerMenu(mediainfo, path):
 
 	try:
-		result = SearchService.Query(urllib.quote(mediainfo.title), "com.plexapp.plugins.amt", None)
+		result = SearchService.Query(mediainfo.title, "com.plexapp.plugins.amt", None)
 	except KeyError, ex:
 		return MessageContainer(
 			"'Apple Movie Trailers' plugin not found.",
