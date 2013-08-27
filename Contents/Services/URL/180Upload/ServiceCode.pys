@@ -1,1 +1,174 @@
-import re, urlparse, cgi, urllib, urllib2, cookielib, timefrom BeautifulSoup import BeautifulSoupUSER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22'# This provider requires a captcha to be solved. In combination with the rest of the code trying to# not hit IceFilms until the last possible minute, makes the lifecycle of a request for a video# slightly complicated as a result. It goes a little like this:## Parsing.GetItemForSource() uses Plex's URL Services along with the special providerinfo hostname# to see if the provider is supported, visible and has any special things it should know about. # In this case, there is: Captchas. This will return a special object back to the upper levels # of the framework letting it know that it should not add a video item to the list but instead add # a Captcha specific set of navigations.## When the user selects this item in the nav, #def NormalizeURL(url):	#Log("*********** In 180Upload NormalizeURL")		# Deal with special providerInfo URL built up by IceFilms plugin to return	# info about this provider. For all other normal URLs, do nothing. 	if ("providerinfo://" in url):			try:			show = Prefs["show_180upload"]		except Exception, ex:			show = True					if (show):			return url + "&visible=true&captcha=true"		else:			return url				else:		return url	def MetadataObjectForURL(url): 	#Log('In MetadataObjectForURL for 180Upload (' + url + ')')		video = VideoClipObject(		title = '180Upload Redirect Page',		summary = '180Upload Redirect Page',		thumb = None,	)		return video	def MediaObjectsForURL(url):	# Somebody knows we're a complicated beast! They've asked us to return the url of the Captcha	# image as well as a URL to submit to get past the captcha.	if ("captcha://" in url):			url = url.replace("captcha://", "http://")				html = HTTP.Request(url, cacheTime=0, headers={'User-Agent':USER_AGENT}).content				data = {}		r = re.findall(r'type="hidden" name="(.+?)" value="(.+?)">', html)				if r:			for name, value in r:				data[name] = value		else:			raise Exception('Unable to resolve 180Upload Link')				#Check for SolveMedia Captcha image		solvemedia = re.search('<iframe src="(http://api.solvemedia.com.+?)"', html)				if solvemedia:			html = HTTP.Request(solvemedia.group(1), cacheTime=0, headers={'User-Agent': USER_AGENT}).content			data['adcopy_challenge']=re.search('id="adcopy_challenge" value="(.+?)">', html).group(1)			captchaURL = "http://api.solvemedia.com%s" % re.search('<img src="(.+?)"', html).group(1)        						# First, break down the URL into it's part		url_parts = urlparse.urlparse(url)		data_qs = urllib.urlencode(data)				# Rebuild the URL with the data args we extracted above.		video_url = urlparse.ParseResult(url_parts.scheme, url_parts.netloc, url_parts.path, None, data_qs, None).geturl()					#Log(video_url)		return [			MediaObject(					parts = [					PartObject(						key=captchaURL,					)				]			),			MediaObject(				parts = [PartObject(key=video_url)],			)		]		elif ('play://' in url):					return [			MediaObject(				parts = [					PartObject(						key=Callback(PlayVideo, url=url.replace("play://", "http://"))					)				],			)		]			else:			url_parts = urlparse.urlparse(url)				# Break down query string.		data = dict(cgi.parse_qsl(url_parts.query))		Log(data)						# Rename captcha arg to correct adcopy_response		data['adcopy_response'] = data['captcha']		del data['captcha']				html = HTTP.Request(			urlparse.ParseResult(url_parts.scheme, url_parts.netloc, url_parts.path, None, None, None).geturl(),			values=data		).content				link = re.search('<a href="(.+?)" onclick="thanks\(\)">Download now!</a>', html)		final_url = "play://180upload.com/?" + urllib.urlencode({'url':link.group(1)}).replace(" ", "+")				return [			MediaObject(				parts = [					PartObject(						key=final_url					)				],			)		]@indirectdef PlayVideo(url):		# Extract out video URL.	url_parts = urlparse.urlparse(url)			# Break down query string.	data = dict(cgi.parse_qsl(url_parts.query))	final_url = data['url'].replace(" ","+")		Log(final_url)		return ObjectContainer(		objects = [			VideoClipObject(				items = [					MediaObject(						parts = [PartObject(key=final_url)],					)				]			)		]	)def LogProviderError(msg="", ex=None):	Log("************************** PROVIDER ERROR: " + msg)	raise Exception(msg)	return []
+import re, urlparse, cgi, urllib, urllib2, cookielib, time
+from BeautifulSoup import BeautifulSoup
+
+USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22'
+
+# This provider requires a captcha to be solved. In combination with the rest of the code trying to
+# not hit IceFilms until the last possible minute, makes the lifecycle of a request for a video
+# slightly complicated as a result. It goes a little like this:
+#
+# Parsing.GetItemForSource() uses Plex's URL Services along with the special providerinfo hostname
+# to see if the provider is supported, visible and has any special things it should know about. 
+# In this case, there is: Captchas. This will return a special object back to the upper levels 
+# of the framework letting it know that it should not add a video item to the list but instead add 
+# a Captcha specific set of navigations.
+#
+# When the user selects this item in the nav, 
+#
+
+def NormalizeURL(url):
+
+	#Log("*********** In 180Upload NormalizeURL")
+	
+	# Deal with special providerInfo URL built up by IceFilms plugin to return
+	# info about this provider. For all other normal URLs, do nothing. 
+	if ("providerinfo://" in url):
+	
+		try:
+			show = Prefs["show_180upload"]
+		except Exception, ex:
+			show = True
+			
+		if (show):
+			return url + "&visible=true&captcha=true"
+		else:
+			return url
+			
+	else:
+		return url
+	
+def MetadataObjectForURL(url):
+ 
+	#Log('In MetadataObjectForURL for 180Upload (' + url + ')')
+	
+	video = VideoClipObject(
+		title = '180Upload Redirect Page',
+		summary = '180Upload Redirect Page',
+		thumb = None,
+	)
+	
+	return video
+	
+def MediaObjectsForURL(url):
+
+	# Somebody knows we're a complicated beast! They've asked us to return the url of the Captcha
+	# image as well as a URL to submit to get past the captcha.
+	if ("captcha://" in url):
+	
+		url = url.replace("captcha://", "http://")
+		
+		html = HTTP.Request(url, cacheTime=0, headers={'User-Agent':USER_AGENT}).content
+		
+		data = {}
+		r = re.findall(r'type="hidden" name="(.+?)" value="(.+?)">', html)
+		
+		if r:
+			for name, value in r:
+				data[name] = value
+		else:
+			raise Exception('Unable to resolve 180Upload Link')
+		
+		#Check for SolveMedia Captcha image
+		solvemedia = re.search('<iframe src="(http://api.solvemedia.com.+?)"', html)
+		
+		if solvemedia:
+			html = HTTP.Request(solvemedia.group(1), cacheTime=0, headers={'User-Agent': USER_AGENT}).content
+			data['adcopy_challenge']=re.search('id="adcopy_challenge" value="(.+?)">', html).group(1)
+			captchaURL = "http://api.solvemedia.com%s" % re.search('<img src="(.+?)"', html).group(1)
+        		
+		
+		# First, break down the URL into it's part
+		url_parts = urlparse.urlparse(url)
+		data_qs = urllib.urlencode(data)
+		
+		# Rebuild the URL with the data args we extracted above.
+		video_url = urlparse.ParseResult(url_parts.scheme, url_parts.netloc, url_parts.path, None, data_qs, None).geturl()	
+		
+		#Log(video_url)
+
+		return [
+			MediaObject(	
+				parts = [
+					PartObject(
+						key=captchaURL,
+					)
+				]
+			),
+			MediaObject(
+				parts = [PartObject(key=video_url)],
+			)
+		]
+	
+	elif ('play://' in url):
+			
+		return [
+			MediaObject(
+				parts = [
+					PartObject(
+						key=Callback(PlayVideo, url=url.replace("play://", "http://"))
+					)
+				],
+			)
+		]
+		
+	else:
+	
+		url_parts = urlparse.urlparse(url)
+		
+		# Break down query string.
+		data = dict(cgi.parse_qsl(url_parts.query))
+		Log(data)
+		
+		
+		# Rename captcha arg to correct adcopy_response
+		data['adcopy_response'] = data['captcha']
+		del data['captcha']
+		
+		html = HTTP.Request(
+			urlparse.ParseResult(url_parts.scheme, url_parts.netloc, url_parts.path, None, None, None).geturl(),
+			values=data
+		).content
+		
+		link = re.search('<a href="(.+?)" onclick="thanks\(\)">Download now!</a>', html)
+		final_url = "play://180upload.com/?" + urllib.urlencode({'url':link.group(1)}).replace(" ", "+")
+		
+		return [
+			MediaObject(
+				parts = [
+					PartObject(
+						key=final_url
+					)
+				],
+			)
+		]
+
+@indirect
+def PlayVideo(url):
+	
+	# Extract out video URL.
+	url_parts = urlparse.urlparse(url)
+		
+	# Break down query string.
+	data = dict(cgi.parse_qsl(url_parts.query))
+	final_url = data['url'].replace(" ","+")
+	
+	Log(final_url)
+	
+	return ObjectContainer(
+		objects = [
+			VideoClipObject(
+				items = [
+					MediaObject(
+						parts = [PartObject(key=final_url)],
+					)
+				]
+			)
+		]
+	)
+
+
+def LogProviderError(msg="", ex=None):
+
+	Log("************************** PROVIDER ERROR: " + msg)
+	raise Exception(msg)
+	return []
