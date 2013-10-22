@@ -1108,7 +1108,7 @@ def SourcesActionMenu(mediainfo, path):
 def SourcesActionTrailerMenu(mediainfo, path):
 
 	try:
-		result = SearchService.Query(mediainfo.title, "com.plexapp.plugins.amt", None)
+		result = SearchService.Query(str(mediainfo.title), "com.plexapp.plugins.amt", None)
 	except KeyError, ex:
 		return MessageContainer(
 			"'Apple Movie Trailers' plugin not found.",
@@ -1117,7 +1117,7 @@ def SourcesActionTrailerMenu(mediainfo, path):
 	except Exception, ex:
 		return MessageContainer(
 			"No Trailers Found",
-			"Couldn't find any trailers for this movie.\nMovie Name: " + mediainfo.title
+			"Couldn't find any trailers for this movie.\nMovie Name: " + str(mediainfo.title)
 		)
 		
 	objects = []
@@ -1129,14 +1129,14 @@ def SourcesActionTrailerMenu(mediainfo, path):
 		if match:
 			title = match.group(1)
 		
-		if (String.LevenshteinDistance(mediainfo.title.lower(), title.lower()) <= 3):
+		if (String.LevenshteinDistance(str(mediainfo.title).lower(), title.lower()) <= 3):
 			objects.append(object)
 			
 	
 	if (len(objects) == 0):
 		return MessageContainer(
 			"No Trailers Found",
-			"Couldn't find any trailers for this movie.\nMovie Name: " + mediainfo.title
+			"Couldn't find any trailers for this movie.\nMovie Name: " + str(mediainfo.title)
 		)
 	else:
 	
@@ -1148,7 +1148,7 @@ def SourcesActionTrailerMenu(mediainfo, path):
 			
 		return ObjectContainer(
 			no_cache=True,
-			title1=mediainfo.title,
+			title1=str(mediainfo.title),
 			title2="Trailers",
 			objects = objects,
 			art=mediainfo.background,
