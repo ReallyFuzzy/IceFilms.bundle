@@ -1,5 +1,6 @@
 import random
 import time
+import re
 
 from datetime import datetime
 from urllib import quote_plus
@@ -7,7 +8,10 @@ from urllib import quote_plus
 from tvdb_api.tvdb_exceptions import tvdb_shownotfound, tvdb_attributenotfound
 from tvdb_api.tvdb_api import Tvdb
 
-MOVIEDB_URL = "http://api.themoviedb.org/2.1/Movie.imdbLookup/en/xml/e3dde0b795a9eca51531ce9f8e688ff6/"
+API_KEY = "e3dde0b795a9eca51531ce9f8e688ff6"
+MOVIEDB_BASE_URL = "http://api.themoviedb.org/3/%%s?api_key=%s" % API_KEY
+MOVIEDB_CONF_URL = MOVIEDB_BASE_URL % "configuration"
+MOVIEDB_URL = MOVIEDB_BASE_URL % "movie/%s" + "&append_to_response=images"
 
 class DBProvider(object):
 
@@ -30,15 +34,13 @@ class MovieDBProvider(object):
 	
 		#try:
 		
-			#Log("Fetching info for: " + imdb_id)
 			imdb_id = kwargs['imdb_id']
+			#Log("Fetching info for: " + imdb_id)
 			
-			title = quote_plus(unicode(imdb_id).encode('utf-8'))
-			url = MOVIEDB_URL + title
+			url = MOVIEDB_URL % quote_plus(unicode(imdb_id).encode('utf-8'))
 
 			#Log("Using URL: " + url)
-			movie_page = XML.ElementFromURL(url,cacheTime=100000)
-			resultsCount = movie_page.xpath("/OpenSearchDescription/opensearch:totalResults/text()",namespaces={"opensearch":"http://a9.com/-/spec/opensearch/1.1/"})[0]
+			result = JSON.ObjectFromURL(url,cacheTime=100000)
 			
 			mediaInfo = MediaInfo()
 			mediaInfo.type = "movies"
@@ -47,41 +49,28 @@ class MovieDBProvider(object):
 			# Save the date we last tried to retrieve the info for this item.
 			# This'll be used to know when to try to re-retrieve the info.
 			mediaInfo.dt = datetime.utcnow()
-			
-			if(resultsCount <> '0') :
-			
+
+			if 'status_code' not in result:
+				
 				mediaInfo.id = str(imdb_id)
+				mediaInfo.tmdb_id = result['id']
+				mediaInfo.title = result['original_title']
+				mediaInfo.summary = result['overview']
+				mediaInfo.rating = result['vote_average']
+				mediaInfo.duration = int(result['runtime']) * 60 * 1000
 			
-				xpRes = movie_page.xpath("/OpenSearchDescription/movies/movie")
-				if (len(xpRes) > 0):
-					movie = xpRes[0]
-				else:
-					return
-					
-				xpRes = movie.xpath("./id/text()")
-				if (len(xpRes) > 0):
-					mediaInfo.tmdb_id = str(xpRes[0])
-					
-				xpRes = movie.xpath("./name/text()")
-				if (len(xpRes) > 0):
-					mediaInfo.title = xpRes[0]
-					
-				mediaInfo.background = self.MovieDBGetImage(movie, "backdrop", ["w1280", "poster", "original"],False)
-				mediaInfo.poster = self.MovieDBGetImage(movie, "backdrop", ["w342", "original"],True)
-				
-				xpRes = movie.xpath("./overview/text()")
-				if (len(xpRes) > 0):
-					mediaInfo.summary = xpRes[0]
-					
-				xpRes = movie.xpath("./rating/text()")
-				
-				if (len(xpRes) > 0):
-					mediaInfo.rating = int(float(xpRes[0]))
-					
-				xpRes = movie.xpath("./runtime/text()")
-				
-				if (len(xpRes) > 0):
-					mediaInfo.duration = int(float(xpRes[0])) * 60 * 1000
+				if ('release_date') in result:
+					re_date = re.match('(\d{4})-(\d{2})-(\d{2})', result['release_date'])
+					mediaInfo.releasedate = (
+						datetime(
+							int(re_date.group(1)),
+							int(re_date.group(2)), 
+							int(re_date.group(3))
+						)
+					)
+			
+				mediaInfo.background = self.MovieDBGetImage(result, "backdrops", ["w1280", "original"],False)
+				mediaInfo.poster = self.MovieDBGetImage(result, "backdrops", ["w300", "original"],True)
 
 						
 			#Log("Saving object: " + imdb_id)
@@ -96,15 +85,20 @@ class MovieDBProvider(object):
 	def MovieDBGetImage(self, movie, type, sizes, rand):
 
 		#Log("In get image")
-		for size in sizes:
-			#Log("Checking for...." + size)
-			xpRes = movie.xpath("./images/image[@size='" + size + "' and @type='" + type + "']/@url")
-			if (len(xpRes) > 0):
-				#Log("Returning...." + xpRes[0])
-				index = 0
-				if rand:
-					index = random.randint(0,len(xpRes) -1)
-				return str(xpRes[index])
+		conf = JSON.ObjectFromURL(MOVIEDB_CONF_URL,cacheTime=100000)
+		
+		images = movie['images'][type]
+		
+		if (len(images) > 0):
+			#Log("Returning...." + xpRes[0])
+			index = 0
+			if rand:
+				index = random.randint(0,len(images) -1)
+				
+			url = images[index]['file_path']
+			url = conf['images']['base_url'] + sizes[0] + url
+			#Log(url)
+			return url
 			
 		Log("Image not found for any of the specified sizes.")
 		return ""
