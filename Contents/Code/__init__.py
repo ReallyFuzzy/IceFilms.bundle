@@ -1217,7 +1217,7 @@ def SourcesActionWatch(item_name=None, items=None, action="watch"):
 
 def CaptchaRequiredMenu(mediainfo, source_item, url, parent_name=None, replace_parent=False):
 
-	oc = ObjectContainer(view_group="InfoList", user_agent=USER_AGENT, no_history=True, title1=parent_name, title2="Captcha", replace_parent=replace_parent)
+	oc = ObjectContainer(no_cache=True, view_group="InfoList", user_agent=USER_AGENT, no_history=True, title1=parent_name, title2="Captcha", replace_parent=replace_parent)
 		
 	# Get the media sources for the passed in URL.
 	# This should be made up of two Media Objects:
