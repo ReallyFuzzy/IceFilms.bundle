@@ -60,7 +60,7 @@ def MediaObjectsForURL(url):
 		html = HTTP.Request(url, cacheTime=0, headers={'User-Agent':USER_AGENT}).content
 		
 		data = {}
-		r = re.findall(r'type="hidden" name="(.+?)" value="(.+?)">', html)
+		r = re.findall(r'type="hidden" name="(.+?)" value="(.*?)"', html)
 		
 		if r:
 			for name, value in r:
@@ -117,7 +117,7 @@ def MediaObjectsForURL(url):
 		
 		# Break down query string.
 		data = dict(cgi.parse_qsl(url_parts.query))
-		Log(data)
+		#Log(data)
 		
 		
 		# Rename captcha arg to correct adcopy_response
@@ -129,8 +129,12 @@ def MediaObjectsForURL(url):
 			values=data
 		).content
 		
-		link = re.search('<a href="(.+?)" onclick="thanks\(\)">Download now!</a>', html)
-		final_url = "play://180upload.com/?" + urllib.urlencode({'url':link.group(1)}).replace(" ", "+")
+		if ('180upload' in url):
+			link = re.search('<a\s+id="lnk_download"\s+href="(.+?)">', html)
+			final_url = "play://180upload.com/?" + urllib.urlencode({'url':link.group(1)}).replace(" ", "+")
+		elif ('epicshare' in url):
+			link = re.search('<a\s+id="lnk_download"\s+href="(.+?)">Regular', html)
+			final_url = "play://180upload.com/?" + urllib.urlencode({'url':link.group(1)}).replace(" ", "+")
 		
 		return [
 			MediaObject(
