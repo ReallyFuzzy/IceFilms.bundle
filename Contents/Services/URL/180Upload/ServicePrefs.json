@@ -1,1 +1,1 @@
-[	{		"id": "show_180upload", "label": "180Upload",		"type": "bool", "default": "true",	},]
+[	{		"id": "show_180upload", "label": "One-Eighty Upload",		"type": "bool", "default": "true",	},	{		"id": "show_epicshare", "label": "EpichShare",		"type": "bool", "default": "true",	},]

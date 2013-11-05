@@ -24,8 +24,12 @@ def NormalizeURL(url):
 	# info about this provider. For all other normal URLs, do nothing. 
 	if ("providerinfo://" in url):
 	
+		match = re.search("(180upload|epicshare)", url.lower())
+		if (match is None):
+			return url
+	
 		try:
-			show = Prefs["show_180upload"]
+			show = Prefs["show_" + match.group(1)]
 		except Exception, ex:
 			show = True
 			
