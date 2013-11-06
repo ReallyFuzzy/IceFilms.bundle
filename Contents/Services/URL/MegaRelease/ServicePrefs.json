@@ -1,0 +1,1 @@
+[	{		"id": "show_megarelease", "label": "MegaRelease",		"type": "bool", "default": "true",	},	{		"id": "show_lemuploads", "label": "LemUploads",		"type": "bool", "default": "true",	},]
