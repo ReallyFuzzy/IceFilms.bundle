@@ -50,6 +50,13 @@ def MetadataObjectForURL(url):
 	# Plugin should have access to info about this URL if user used plugin to launch video.
 	# Bad things can happen here. Still want to run rest of code if possible though...
 	try:
+	
+		if ('play://' in url):
+			url = url.replace("play://","http://")
+			url_parts = urlparse.urlparse(url)
+			qs = cgi.parse_qs(url_parts.query)
+			url = urllib.unquote_plus(qs['browse_url'][0])
+		
 		request = urllib2.Request(PLUGIN_URL + "/mediainfo/%s" % String.Encode(url))
 		mediainfo = JSON.ObjectFromString(urllib2.urlopen(request).read())
 		

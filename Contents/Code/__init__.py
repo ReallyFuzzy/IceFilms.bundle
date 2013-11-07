@@ -1217,7 +1217,8 @@ def SourcesActionWatch(item_name=None, items=None, action="watch"):
 
 def CaptchaRequiredMenu(mediainfo, source_item, url, parent_name=None, replace_parent=False):
 
-	oc = ObjectContainer(no_cache=True, view_group="InfoList", user_agent=USER_AGENT, no_history=True, title1=parent_name, title2="Captcha", replace_parent=replace_parent)
+	# Cache required as some clients will re-request menu after looking at captcha image.
+	oc = ObjectContainer(no_cache=False, view_group="InfoList", user_agent=USER_AGENT, no_history=True, title1=parent_name, title2="Captcha", replace_parent=replace_parent)
 		
 	# Get the media sources for the passed in URL.
 	# This should be made up of two Media Objects:
@@ -2399,7 +2400,7 @@ def MediaInfoLookup(url):
 	item = cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY)).getByURL(decoded_url)
 
 	if (item is None):
-		Log("****** ERROR: Watching Item which hasn't been browsed to")
+		Log("****** ERROR: Watching Item which hasn't been browsed to (" + decoded_url + ")")
 		return ""
 	
 	# Return the media info that was stored in the recently browsed item.
@@ -2428,7 +2429,7 @@ def PlaybackStarted(url):
 		item = browsed_items.getByURL(decoded_url)
 		
 		if (item is None):
-			Log("****** ERROR: Watching Item which hasn't been browsed to")
+			Log("****** ERROR: Watching Item which hasn't been browsed to (" + decoded_url + ")")
 			return ""
 		
 		# We may just be an additional source and we're playing this on behalf of another
