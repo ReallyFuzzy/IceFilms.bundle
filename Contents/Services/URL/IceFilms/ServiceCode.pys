@@ -219,15 +219,21 @@ def GetSourceFromURL(url):
 	params['t'] = t	
 
 	page = HTTP.Request(ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.phpAjaxResp.php", values=params, headers=headers).content
-	page = HTTP.Request(ICEFILMS_URL + page).content
 	
-	url_loc = page.rfind('http')
+	provider_url = ICEFILMS_URL + page
+	url_parts = urlparse.urlparse(provider_url)
+	qs = cgi.parse_qs(url_parts.query)
+	provider_url = urllib.unquote_plus(qs['url'][0])
+	Log(provider_url)
+	
+	#page = HTTP.Request(ICEFILMS_URL + page).content
+	#url_loc = page.rfind('http')
 
-	if url_loc == -1:
-		return None
+	#if url_loc == -1:
+	#	return None
 
-	url_end = page.find('<', url_loc)
-	provider_url = urllib.unquote(page[url_loc:url_end])
+	#url_end = page.find('<', url_loc)
+	#provider_url = urllib.unquote(page[url_loc:url_end])
 	
 	return provider_url
 	
