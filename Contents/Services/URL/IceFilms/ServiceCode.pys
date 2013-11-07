@@ -107,7 +107,24 @@ def MediaObjectsForURL(url):
 				provider_url_parts.fragment
 			).geturl()	
 		)
-
+		
+	elif ("play://" in url):
+	
+		url = url.replace("play://","http://")
+		url_parts = urlparse.urlparse(url)
+		qs = cgi.parse_qs(url_parts.query)
+		
+		browse_url = urllib.unquote_plus(qs['browse_url'][0])
+		final_url =  urllib.unquote_plus(qs['final_url'][0])
+		
+		# Delay working out the real provider's URL until video is picked.
+		# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id
+		return [
+			MediaObject(
+				parts = [PartObject(key=Callback(PlayCaptchaVideo, browse_url=browse_url, provider_url=final_url))],
+			)
+		]
+		
 	else:
 	
 		# Delay working out the real provider's URL until video is picked.
@@ -122,7 +139,16 @@ def MediaObjectsForURL(url):
 def PlayVideo(url):
 
 	provider_url = GetSourceFromURL(url)
+	return PlayProviderVideo(url, provider_url)
 	
+@indirect
+def PlayCaptchaVideo(browse_url, provider_url):
+
+	return PlayProviderVideo(browse_url, provider_url)
+	
+	
+def PlayProviderVideo(browse_url, provider_url):
+
 	media_objects = URLService.MediaObjectsForURL(provider_url)
 	
 	# !!!Complete Hack Alert!!!
@@ -146,7 +172,7 @@ def PlayVideo(url):
 		media_objects[0].parts[0].key = response_obj.xpath("//Part/@key")[0]
 		
 	if (len(media_objects) > 0):
-		PlaybackStarted(url=url)
+		PlaybackStarted(url=browse_url)
 		
 	return ObjectContainer(
 		objects = [
@@ -159,13 +185,16 @@ def PlayVideo(url):
 # Given a plugin specific IceFilms URL, work out final provider URL.
 def GetSourceFromURL(url):
 
-	id_reg_ex = re.compile("/external/(\d+)/(\d+)")
+	id_reg_ex = re.compile("/(\d+)/(\d+)")
 	match = id_reg_ex.search(url)
 	id = match.group(1)
 	part_id = match.group(2)
+	
+	headers = {}
+	headers['User-Agent'] = USER_AGENT
 
 	# Reload sources page to make sure we've got latest version of all the bits we need.
-	sources_page = HTTP.Request(ICEFILMS_SOURCES_URL  % id, cacheTime=0)
+	sources_page = HTTP.Request(ICEFILMS_SOURCES_URL  % id, cacheTime=0, headers=headers)
 	
 	# Extract out the secret arguments that are needed to get the real URL of 
 	# sources for this item.
@@ -182,7 +211,7 @@ def GetSourceFromURL(url):
 	params['sec'] = secret
 	params['t'] = t	
 
-	page = HTTP.Request(ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.phpAjaxResp.php", params).content
+	page = HTTP.Request(ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.phpAjaxResp.php", values=params, headers=headers).content
 	page = HTTP.Request(ICEFILMS_URL + page).content
 	
 	url_loc = page.rfind('http')

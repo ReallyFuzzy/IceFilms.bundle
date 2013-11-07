@@ -23,6 +23,15 @@ AZ_ICON='icon-az.png'
 
 ADDITIONAL_SOURCES = ['lmwt']
 
+# When a provider uses CAPTCHAs, the back and forth needed to get the user to solve the CAPTCHA
+# means that we eventually stop using the main site's (i.e: iceFilm) URL service. As a result,
+# when it comes time to play the video, the main site's URL service is no longer called and
+# can't mark the video has having been played. So, instead, we let the Captcha Play menu re-insert
+# a reference to the main site's URL service.
+def GetCaptchaPlayURL():
+
+	return "play://icefilms.info/?browse_url=%s&final_url=%s"
+	
 def GetGenres():
 
 	return [
@@ -80,7 +89,6 @@ def GetSections(type, genre):
 					'type': 'type',
 				},
 			)
-		
 		
 		sections.append(
 			{

@@ -992,10 +992,10 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 	
 		mediaItem = GetItemForSource(mediainfo=mediainfo2, source_item=source_item, parent_name=oc.title2)
 		
-		if mediaItem is not None:
-			oc.add(mediaItem)
-			if (hasattr(mediaItem, 'url')):
-				providerURLs.append(mediaItem.url)
+		if mediaItem is not None and 'item' in mediaItem and mediaItem['item'] is not None:
+			oc.add(mediaItem['item'])
+			if ('url' in mediaItem and mediaItem['url'] is not None):
+				providerURLs.append(mediaItem['url'])
 				
 	if (not external_caller and len(Dict[ADDITIONAL_SOURCES_KEY]) > 0):
 		oc.add(
@@ -1226,33 +1226,33 @@ def CaptchaRequiredMenu(mediainfo, source_item, url, parent_name=None, replace_p
 	
 	media_objects = URLService.MediaObjectsForURL(url)
 	
-	captcha_URL = media_objects[0].parts[0].key
-	video = media_objects[1].parts[0].key
+	captcha_img_URL = media_objects[0].parts[0].key
+	solve_captcha_URL = media_objects[1].parts[0].key
 	
-	#Log("In captchaRequiredMenu, url: " + url + ", captchaURL:" + captcha_URL + ", video_url: " + video)
+	#Log("In captchaRequiredMenu, url: " + url + ", captcha_img_URL:" + captcha_img_URL + ", solve_captcha_URL: " + solve_captcha_URL)
 	
 	oc.add(
 		InputDirectoryObject(
-			key=Callback(CaptchaProcessMenu, mediainfo=mediainfo, source_item=source_item, url=url, post_captcha_url=video, parent_name=oc.title1),
+			key=Callback(CaptchaProcessMenu, mediainfo=mediainfo, source_item=source_item, url=url, solve_captcha_url=solve_captcha_URL, parent_name=oc.title1),
 			title="Enter Captcha...",
 			prompt="Enter Captcha to view item.",
 			tagline="This provider requires that you solve this Captcha.",
 			summary="This provider requires that you solve this Captcha.",
-			thumb=PLUGIN_URL + "/proxy?" + urllib.urlencode({'url':captcha_URL}),
+			thumb=PLUGIN_URL + "/proxy?" + urllib.urlencode({'url':captcha_img_URL}),
 			art=mediainfo.background,
 		)
 	)
 	
 	return oc
 	
-def CaptchaProcessMenu(query, mediainfo, source_item, url, post_captcha_url, parent_name=None):
+def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, parent_name=None):
 
 	oc = ObjectContainer(
 			view_group="InfoList", user_agent=USER_AGENT, no_history=True, replace_parent=True,
 			title1=parent_name, title2="Succesful Captcha"
 	)
 	
-	#Log("In captchaProcessMenu, url: " + url + ", postcaptchaURL:" + post_captcha_url)
+	#Log("In captchaProcessMenu, url: " + url + ", solveCaptchaURL:" + solve_captcha_url)
 
 	# Some clients (I'm looking at you here iOS) seem to ignore the URLService resolved parts that
 	# get added when this is returned to it and instead re-request the main video clip object's URL
@@ -1261,7 +1261,7 @@ def CaptchaProcessMenu(query, mediainfo, source_item, url, post_captcha_url, par
 	# then we have a sad client with no videos :( So, instead, manually resolve the post-Captcha
 	# URL here so we can set that in the VideoClipObject.
 	try:
-		video_media = URLService.MediaObjectsForURL(post_captcha_url + "&" + urllib.urlencode({"captcha":query}))
+		video_media = URLService.MediaObjectsForURL(solve_captcha_url + "&" + urllib.urlencode({"captcha":query}))
 	except Exception, ex:
 		# Something went wrong. Chances are the Captcha is wrong. Go back and load a new one.
 		# FIXME: Need tighter error checking.
@@ -1269,6 +1269,13 @@ def CaptchaProcessMenu(query, mediainfo, source_item, url, post_captcha_url, par
 			
 	video_url = video_media[0].parts[0].key
 	
+	# The url arg is still the original URL returned by GetItemForSource and will be the one that
+	# was used to store all the different possible URLs for the current item. Pass that along to
+	# the current site's playURL so that it can mark the video has played when the user selects
+	# the VideoClipObjecy.
+	if (hasattr(Site,"GetCaptchaPlayURL")):
+		video_url = Site.GetCaptchaPlayURL() % (urllib.quote_plus(url), urllib.quote_plus(video_url))
+
 	vc = VideoClipObject(
 		url=video_url,
 		title="Play Now",
@@ -2230,28 +2237,36 @@ def GetItemForSource(mediainfo, source_item, parent_name):
 	
 		if (isinstance(media_item,CaptchaRequiredObject)):
 		
-			return DirectoryObject(
-				key = Callback(CaptchaRequiredMenu, mediainfo=mediainfo, source_item=source_item, url=media_item.url, parent_name=parent_name),
-				title = media_item.title + " (Captcha)",
-				summary= mediainfo.summary,
-				art=mediainfo.background,
-				thumb= mediainfo.poster,
-			)
+			return {
+				'item':
+					DirectoryObject(
+						key = Callback(CaptchaRequiredMenu, mediainfo=mediainfo, source_item=source_item, url=media_item.url, parent_name=parent_name),
+						title = media_item.title + " (Captcha)",
+						summary= mediainfo.summary,
+						art=mediainfo.background,
+						thumb= mediainfo.poster,
+					),
+				'url': media_item.url
+			}
 		else:
-			return media_item
+			return { 'item': media_item, 'url': media_item.url }
 		
 	# The only way we can get down here is if the provider wasn't supported or
 	# the provider was supported but not visible. Maybe user still wants to see them?
 	if (Prefs['show_unsupported']):
-		return DirectoryObject(
-			key = Callback(PlayVideoNotSupported, mediainfo = mediainfo),
-			title = source_item['name'] + " - " + source_item['provider_name'] + " (Not playable)",
-			summary= mediainfo.summary,
-			art=mediainfo.background,
-			thumb= mediainfo.poster,
-		)
+		return {
+			'item': 
+				DirectoryObject(
+					key = Callback(PlayVideoNotSupported, mediainfo = mediainfo),
+					title = source_item['name'] + " - " + source_item['provider_name'] + " (Not playable)",
+					summary= mediainfo.summary,
+					art=mediainfo.background,
+					thumb= mediainfo.poster,
+				)
+		}
+		
 	else:
-		return
+		return {}
 
 	
 ####################################################################################################

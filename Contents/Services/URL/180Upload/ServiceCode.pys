@@ -86,7 +86,7 @@ def MediaObjectsForURL(url):
 		data_qs = urllib.urlencode(data)
 		
 		# Rebuild the URL with the data args we extracted above.
-		video_url = urlparse.ParseResult(url_parts.scheme, url_parts.netloc, url_parts.path, None, data_qs, None).geturl()	
+		video_url = urlparse.ParseResult("solve", url_parts.netloc, url_parts.path, None, data_qs, None).geturl()	
 		
 		#Log(video_url)
 
@@ -103,20 +103,9 @@ def MediaObjectsForURL(url):
 			)
 		]
 	
-	elif ('play://' in url):
-			
-		return [
-			MediaObject(
-				parts = [
-					PartObject(
-						key=Callback(PlayVideo, url=url.replace("play://", "http://"))
-					)
-				],
-			)
-		]
-		
-	else:
+	elif ("solve://" in url):
 	
+		url = url.replace("solve://", "http://")
 		url_parts = urlparse.urlparse(url)
 		
 		# Break down query string.
@@ -149,6 +138,20 @@ def MediaObjectsForURL(url):
 				],
 			)
 		]
+		
+	elif ('play://' in url):
+			
+		return [
+			MediaObject(
+				parts = [
+					PartObject(
+						key=Callback(PlayVideo, url=url.replace("play://", "http://"))
+					)
+				],
+			)
+		]
+		
+	
 
 @indirect
 def PlayVideo(url):

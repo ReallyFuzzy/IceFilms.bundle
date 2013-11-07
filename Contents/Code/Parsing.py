@@ -243,19 +243,19 @@ def GetItemForSource(mediainfo, source_item):
 		
 			# Note the special URL we return here. This a made up URL which doesn't exist in the
 			# real world, but which will be caught by a URL Service included with this plugin,
-			# which will return a MediaObject with an inderct callback as it's key.
+			# which will return a MediaObject with an indrect callback as it's key.
 			#
 			# This allows us to delay looking up the provider's URL until the user actually 
 			# selects the video and prevents us from hammering IceFilms every time an item's
 			# source are shown.
 			if (captcha):
 				return CaptchaRequiredObject(
-					url="captcha://www.icefilms.info/external/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
+					url="captcha://icefilms.info/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
 					title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
 				)
 			
 			return VideoClipObject(
-				url="http://www.icefilms.info/external/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
+				url="external://icefilms.info/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
 				title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
 				summary=mediainfo.summary,
 				art=mediainfo.background,
