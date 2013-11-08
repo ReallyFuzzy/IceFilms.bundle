@@ -162,6 +162,32 @@ def VideoMainMenu():
 
 	oc = ObjectContainer(no_cache=True, title1=L("Video Channels"), title2=NAME, view_group="InfoList")
 	
+	# Get latest version number of plugin.
+	try:
+	
+		soup = BeautifulSoup(HTTP.Request(LATEST_VERSION_URL, cacheTime=3600).content)
+		latest_version = soup.find('div',{'class':'markdown-body'}).p.string
+		
+		if (latest_version != VERSION):
+		
+			summary = soup.find('div',{'class':'markdown-body'}).pre.code.string
+			summary += "\nClick to be taken to the Unsupported App Store"
+			latest_version_summary = summary
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(UpdateMenu),
+					title='--- Plugin Update Available ---',
+					tagline="Version " + latest_version + " is now available. You have " + VERSION,
+					summary=latest_version_summary,
+					thumb=None,
+					art=R(ART)
+				)
+			)
+			
+	except Exception, ex:
+		Log("******** Error retrieving and processing latest version information. Exception is:\n" + str(ex))
+		
 	oc.add(
 		DirectoryObject(
 			key=Callback(TypeMenu, type="movies", parent_name=oc.title2),
@@ -227,33 +253,6 @@ def VideoMainMenu():
 			summary="Send a test email to the email address specified in the preferences",
 		)
 	)
-		
-	
-	# Get latest version number of plugin.
-	try:
-	
-		soup = BeautifulSoup(HTTP.Request(LATEST_VERSION_URL, cacheTime=3600).content)
-		latest_version = soup.find('div',{'class':'markdown-body'}).p.string
-		
-		if (latest_version != VERSION):
-		
-			summary = soup.find('div',{'class':'markdown-body'}).pre.code.string
-			summary += "\nClick to be taken to the Unsupported App Store"
-			latest_version_summary = summary
-			
-			oc.add(
-				DirectoryObject(
-					key=Callback(UpdateMenu),
-					title='Update Available',
-					tagline="Version " + latest_version + " is now available. You have " + VERSION,
-					summary=latest_version_summary,
-					thumb=None,
-					art=R(ART)
-				)
-			)
-			
-	except Exception, ex:
-		Log("******** Error retrieving and processing latest version information. Exception is:\n" + str(ex))
 	
 	# This is a user requested menu which the user must go through when using / launching
 	# the plugin. If it's been more than 3 hours since we last saw the user, assume
