@@ -10,8 +10,9 @@ NAME="IceFilms"
 LATEST_VERSION_URL = 'http://bit.ly/xjrEcV'
 
 # Plugin interest tracking.
-VERSION = "12.11.23.1"
+VERSION = "13.11.08.1"
 VERSION_URLS = {
+	"13.11.08.1": "http://bit.ly/1beJy1t",
 	"12.11.23.1": "http://bit.ly/Wnnzy7",
 	"12.02.26.1": "http://bit.ly/z3wPud",
 	"1.0" : "http://bit.ly/xGIrmH"
