@@ -274,7 +274,7 @@ def GetItemForSource(mediainfo, source_item):
 	
 ####################################################################################################
 
-def GetSearchResults(query=None,type=None,imdb_id=None):
+def GetSearchResults(query=None,type=None,imdb_id=None, exact=False):
 	
 	if (type=="movies"):
 		# This a google search. The -tv will ommit all TV shows.

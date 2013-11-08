@@ -102,8 +102,11 @@ def Start():
 	HTTP.Headers['Accept-Encoding'] = '*gzip, deflate'
 	HTTP.Headers['Connection'] = 'keep-alive'
 
-	if hasattr(Site, 'Start'):
-		Site.Start()
+	if hasattr(Site, 'Init'):
+		Site.Init()
+	
+	if hasattr(Parsing, 'Init'):
+		Parsing.Init()
 	
 	# Assign default values for stuff we may need.
 	if (not Dict[LAST_USAGE_TIME_KEY]):
@@ -298,14 +301,18 @@ def TestEmailMenu():
 def UpdateMenu():
 
 	# Force an update to the UAS' version info.
-	HTTP.Request(
-		"http://" + Request.Headers['Host'] + "/applications/unsupportedappstore/:/function/ApplicationsMainMenu",
-		cacheTime=0,
-		immediate=True
-	)
+	try:
+		# This will throw a 404 as it returns no data and Plex doesn't like that.
+		HTTP.Request(
+			"http://" + Request.Headers['Host'] + "/applications/unsupportedappstore/updatecheck",
+			cacheTime=0,
+			immediate=True
+		)
+	except Exception,ex:
+		pass
 	
 	# Go to the UAS.
-	return Redirect('/applications/unsupportedappstore/:/function/InstalledMenu?function_args=Y2VyZWFsMQozCmRpY3QKZGljdApGcmFtZXdvcmsub2JqZWN0cy5JdGVtSW5mb1JlY29yZAoxCnIyCnM2CnNlbmRlcjUKczkKSW5zdGFsbGVkczkKaXRlbVRpdGxlczIwClVuU3VwcG9ydGVkIEFwcFN0b3JlczYKdGl0bGUxczQKTm9uZXM2CnRpdGxlMnM3NAovYXBwbGljYXRpb25zL3Vuc3VwcG9ydGVkYXBwc3RvcmUvOi9yZXNvdXJjZXMvYXJ0LWRlZmF1bHQuanBnP3Q9MTMyOTQzNDEyOHMzCmFydHM3NQovYXBwbGljYXRpb25zL3Vuc3VwcG9ydGVkYXBwc3RvcmUvOi9yZXNvdXJjZXMvaWNvbi1kZWZhdWx0LnBuZz90PTEzMjk0MzQxMjhzNQp0aHVtYnIxCnIwCg__')
+	return Redirect('/applications/unsupportedappstore/installed')
 	
 ####################################################################################################
 # Menu users seen when they select TV shows in Main menu
@@ -414,7 +421,7 @@ def TypeMenu(type=None, genre=None, path=[], parent_name=None):
 					title="Search",
 					tagline="Search for a title using this feature",
 					summary="Search for a title using this feature",
-					prompt="Please enter a search term",
+					prompt="Search for items containing...",
 					thumb=R(SEARCH_ICON),
 					art=R(ART)				
 				)
@@ -1322,7 +1329,18 @@ def SearchResultsMenu(query, type, parent_name=None):
 	if (type=="movies"):
 		func_name = SourcesMenu
 		
-	for item in Parsing.GetSearchResults(query=query, type=type):
+	exact = False
+	
+	# Strip out the year out of the given search term if one is found.
+	# This helps auto-complete work on the Roku client which runs searches
+	# as users are entering data  and then lets users select those results
+	# as a new search term.
+	
+	if (re.search("\s*\(\d*\)", query)):
+		query = re.sub("\s*\(\d*\)\s*","",query)
+		exact = True
+		
+	for item in Parsing.GetSearchResults(query=query, type=type, exact=exact):
 		title = item.title + " (" + str(item.year) + ")" if item.year else item.title
 		oc.add(
 			DirectoryObject(
@@ -1386,12 +1404,12 @@ def HistoryMenu(parent_name=None):
 					poster = mediainfo.season_poster
 				
 			if (Prefs['watched_grouping'] == 'Episode'):
-				title = title + ' - ' + mediainfo.title
+				title = title + ' - ' + str(mediainfo.title)
 				poster = mediainfo.poster
 				summary = mediainfo.summary
 				
 		else:
-			title = mediainfo.title
+			title = str(mediainfo.title)
 			summary = mediainfo.summary
 			
 		oc.add(
@@ -1716,59 +1734,63 @@ def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_par
 	# For each favourite item....
 	for item in favs.get(sort=sort_order):
 	
-		#Log(item.mediainfo.title)
-		
-		# If a label has been given, see if the item has the current label. 
-		if (label and label not in item.labels):
-			continue
+		try:
+			#Log(item.mediainfo.title)
 			
-		# If no label has been given, check that the item also has no label
-		if (not label and len(item.labels) > 0):
-			continue
-			
-		mediainfo = item.mediainfo
-		navpath = item.path
-		
-		title = mediainfo.title
-		if (item.new_item):
-			title =  u"\u00F8" + "  " + title
-		else:
-			title =  '    ' + title
-			if (new_items_only):
+			# If a label has been given, see if the item has the current label. 
+			if (label and label not in item.labels):
 				continue
 				
-		# If the item is a TV show, come up with sensible display name.
-		summary = ""
-		if (mediainfo.type == 'movies'):
-			summary = mediainfo.summary
-		else:
-			if (item.new_item_check):
-				if (item.new_item):
-					local = item.date_last_item_check.replace(tzinfo=tz.tzutc()).astimezone(tz.tzlocal())
-					summary += str(L("FavouritesNewItemNotifySummaryNew")) % local.strftime("%Y-%m-%d %H:%M")
-				else:
-					last_check = item.date_last_item_check.replace(tzinfo=tz.tzutc()).astimezone(tz.tzlocal())
-					next_check = item.next_check_date().replace(tzinfo=tz.tzutc()).astimezone(tz.tzlocal())
-					summary += str(L("FavouritesNewItemNotifySummaryNoNew")) % (last_check.strftime("%Y-%m-%d %H:%M"), next_check.strftime("%Y-%m-%d %H:%M"))
-		
-		oc.add(
-			PopupDirectoryObject(
-				key=Callback(
-					FavouritesNavPathMenu,
-					mediainfo=item.mediainfo,
-					path=item.path,
-					new_item_check=item.new_item_check,
-					parent_name=oc.title2
-				),
-				title= title,
-				summary=summary,
-				art=mediainfo.background,
-				thumb= mediainfo.poster,
-				duration=mediainfo.duration,
+			# If no label has been given, check that the item also has no label
+			if (not label and len(item.labels) > 0):
+				continue
 				
-			)
-		)
+			mediainfo = item.mediainfo
+			navpath = item.path
 			
+			title = str(mediainfo.title)
+			if (item.new_item):
+				title =  u"\u00F8" + "  " + title
+			else:
+				title =  '    ' + title
+				if (new_items_only):
+					continue
+					
+			# If the item is a TV show, come up with sensible display name.
+			summary = ""
+			if (mediainfo.type == 'movies'):
+				summary = mediainfo.summary
+			else:
+				if (item.new_item_check):
+					if (item.new_item):
+						local = item.date_last_item_check.replace(tzinfo=tz.tzutc()).astimezone(tz.tzlocal())
+						summary += str(L("FavouritesNewItemNotifySummaryNew")) % local.strftime("%Y-%m-%d %H:%M")
+					else:
+						last_check = item.date_last_item_check.replace(tzinfo=tz.tzutc()).astimezone(tz.tzlocal())
+						next_check = item.next_check_date().replace(tzinfo=tz.tzutc()).astimezone(tz.tzlocal())
+						summary += str(L("FavouritesNewItemNotifySummaryNoNew")) % (last_check.strftime("%Y-%m-%d %H:%M"), next_check.strftime("%Y-%m-%d %H:%M"))
+			
+			oc.add(
+				PopupDirectoryObject(
+					key=Callback(
+						FavouritesNavPathMenu,
+						mediainfo=item.mediainfo,
+						path=item.path,
+						new_item_check=item.new_item_check,
+						parent_name=oc.title2
+					),
+					title= title,
+					summary=summary,
+					art=mediainfo.background,
+					thumb= mediainfo.poster,
+					duration=mediainfo.duration,
+					
+				)
+			)
+
+		except Exception, ex:
+			Log.Exception("Error whilst dispaying a favourite. MediaInfo was: " + str(item.mediainfo))
+		
 	return oc
 
 ####################################################################################################
@@ -1954,7 +1976,7 @@ def FavouritesLabelsItemMenu(mediainfo, parent_name, replace_parent=False):
 	# Load up Favourites.
 	favs = load_favourite_items() 
 		
-	oc = ObjectContainer(no_cache=True, replace_parent=replace_parent, title1=parent_name, title2="Labels for " + mediainfo.title)
+	oc = ObjectContainer(no_cache=True, replace_parent=replace_parent, title1=parent_name, title2="Labels for " + str(mediainfo.title))
 	
 	oc.add(
 		InputDirectoryObject(
@@ -2214,7 +2236,7 @@ def CheckForNewItemsInFavourite(favourite, force=False):
 		# of whether any new eps are still available because the user has watched one).
 		try:
 			if (has_new_items and Prefs['favourite_notify_email'] and not force):
-				Log('Notifying about new item for title: ' + favourite.mediainfo.title)
+				Log('Notifying about new item for title: ' + str(favourite.mediainfo.title))
 				Notifier.notify(
 					Prefs['favourite_notify_email'],
 					str(NAME),
@@ -2222,7 +2244,7 @@ def CheckForNewItemsInFavourite(favourite, force=False):
 					favourite.mediainfo.poster
 				)
 		except Exception, ex:
-			Log.Exception("ERROR Whilst sending email notification about " + favourite.mediainfo.title)
+			Log.Exception("ERROR Whilst sending email notification about " + str(favourite.mediainfo.title))
 			pass
 			
 			
