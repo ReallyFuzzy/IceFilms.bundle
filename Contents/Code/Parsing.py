@@ -13,16 +13,14 @@ import Utils
 from NavExObject import CaptchaRequiredObject
 from MetaProviders import DBProvider, MediaInfo
 
-LMWT_SEARCH_URL= "http://www.1channel.ch/index.php"
-
-ICEFILMS_URL = "http://www.icefilms.info"
+ICEFILMS_URL = "http://icefilms.info"
 ICEFILMS_VIDEO_URL = ICEFILMS_URL + "/ip.php?v=%s"
 ICEFILMS_SOURCES_URL = ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.php?h=374&w=631&vid=%s&img="
 ICEFILMS_AJAX = ICEFILMS_URL+'membersonly/components/com_iceplayer/video.phpAjaxResp.php'
 ICEFILMS_REFERRER = ICEFILMS_URL
 
 ####################################################################################################
-# LMWT PAGE PARSING
+# ICEFILMS PAGE PARSING
 ####################################################################################################
 
 ####################################################################################################
@@ -321,9 +319,9 @@ def GetSearchResults(query=None,type=None,imdb_id=None, exact=False):
 def GetMediaInfo(url, mediainfo, query_external=False):
 
 	"""
-	Retrieve meta data about the passed in LMWT item from a meta provider.
+	Retrieve meta data about the passed in IceFilms item from a meta provider.
 	Additionally, for any info not returned by the meta provider, try to
-	collect the info directly from the LMWT item page.
+	collect the info directly from the IceFilms item page.
 	"""
 	
 	try:

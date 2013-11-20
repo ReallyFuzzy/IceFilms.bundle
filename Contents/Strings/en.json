@@ -11,6 +11,10 @@
 "TVSubtitle":"TV Shows & Episodes",
 "TVSummary":"Collection of TV Shows and Episodes",
 
+"BufferTitle":"Pre-Buffering",
+"BufferSubtitle":"Pre-buffered items.",
+"BufferSummary":"Manage and watch pre-buffered items.",
+
 "HistoryTitle":"Recently Watched",
 "HistorySubtitle":"Access recently watched items",
 "HistorySummary":"Quick access to items you have recently watched.",

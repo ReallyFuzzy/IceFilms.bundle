@@ -1,3 +1,5 @@
+import os
+
 """ 
 Module to hold site specific config options.
 
@@ -24,6 +26,12 @@ AZ_ICON='icon-az.png'
 
 ADDITIONAL_SOURCES = ['lmwt']
 
+DATA_PATHS = { 
+		'MacOSX': "/Library/Application Support/Plex Media Server/Plug-in Support/Data/com.plexapp.plugins.icefilms/BufferItems",
+		'Windows': "",
+		'Linux': "",
+	}
+
 # When a provider uses CAPTCHAs, the back and forth needed to get the user to solve the CAPTCHA
 # means that we eventually stop using the main site's (i.e: iceFilm) URL service. As a result,
 # when it comes time to play the video, the main site's URL service is no longer called and
@@ -32,6 +40,18 @@ ADDITIONAL_SOURCES = ['lmwt']
 def GetCaptchaPlayURL():
 
 	return "play://icefilms.info/?browse_url=%s&final_url=%s"
+	
+# Path in which to save pre-buffered items.
+def GetBufferPath():
+
+	dir = (os.getenv('USERPROFILE') or os.getenv('HOME')) + DATA_PATHS[Platform.OS]
+	
+	# Check the directory exists.
+	if (not os.path.exists(dir)):
+		# If not, create it.
+		os.makedirs(dir)	
+		
+	return dir
 	
 def GetGenres():
 

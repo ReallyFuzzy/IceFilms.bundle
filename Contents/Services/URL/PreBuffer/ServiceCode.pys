@@ -1,0 +1,154 @@
+import os
+import tempfile
+import urllib, urllib2
+import time
+from threading import Thread
+
+def NormalizeURL(url):
+
+	return url
+	
+def MetadataObjectForURL(url):
+
+	return VideoClipObject(title = 'PreBuffer Redirect Page')
+	
+def MediaObjectsForURL(url):
+
+	return [
+		MediaObject(
+			parts = [
+				PartObject(key=Callback(PlayVideo,url=url))
+			],
+		)
+	]
+	
+@indirect
+def PlayVideo(url):
+
+	filePath = url.replace("prebuffer://","")
+	
+	# Welcome to crazy town....
+	#
+	# Plex doesn't handle local files if they're not in a user library. So, temporarily add 
+	# the file to play to one...
+	#
+	#ÊThere supposedly is a way to stream any file off the local file system (Stream.LocalFile 
+	# from StreamKit), but that's currently broken and I doubt that it'll get fixed. Serving
+	# the file via the Plugin's tornado Web Server instance using R() leads to very poor 
+	# performance as does spinning up our own tornado instance and serving from there.
+	#
+	# Annoyingly enough, it all could be so easy...
+	#
+	# The desktop clients could easily be supported when running on the same machine as the
+	# server by returning a file:// URL. However, this won't work when they're running on a different
+	# machine. Remaining clients (which will ask for the file to be transcoded since we don't know
+	# anything about the buffered item), do support a file:// URL but only if it doesn't contain
+	# space, which won't be the case for us due to where we save the buffered items.
+	
+	# Create a tmp folder.
+	tempPath = tempfile.mkdtemp()
+	tempFile = tempPath + "/play.m4v"
+	
+	Log(tempPath)
+	Log(filePath)
+	
+	# Create a symlink back to the file.
+	os.link(filePath, tempFile)
+	
+	# Create a library for the tmp folder above.
+	#
+	# Create an opener that understands 201 status codes returned by Plex.
+	opener = urllib2.build_opener(HTTPBetterErrorProcessor)
+	
+	request = urllib2.Request(
+		"http://127.0.0.1:32400/library/sections?" +
+		"type=movie" +
+		"&agent=com.plexapp.agents.none" +
+		"&scanner=Plex+Video+Files+Scanner" +
+		"&language=xn" +
+		"&location=" + urllib.quote_plus(tempPath)
+		+"&name=PreBuffer+Play+-+XXXX2",
+	)
+	
+	response = opener.open(request,"")
+		
+	# Pick up Location header which contains our Library ID.
+	libURL = response.info()["Location"]
+	
+	# Refresh the library.
+	request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/refresh")
+	response = opener.open(request)
+	
+	fileURL = None
+	cnt = 0
+	while (cnt <= 5):
+
+		time.sleep(2)
+	
+		# Get the play ID of the item and send that to client.
+		request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/all")
+		response = opener.open(request)
+	
+	
+		# Look for the one and only media item in there.
+		content = response.read()
+		elem = XML.ElementFromString(content)
+		partElems = elem.xpath("//Part")
+	
+		if (len(partElems) > 0):
+			fileURL = partElems[0].get("key")
+			break
+		else:
+			cnt = cnt + 1
+	
+	# Schedule for the library to be removed.
+	CleanupAgent(libURL).start()
+	
+	if (fileURL is None):
+		pass
+	else:
+	
+		return ObjectContainer(
+			objects = [
+				VideoClipObject(
+					items = [
+						MediaObject(
+							parts = [
+								PartObject(key=fileURL),
+							],
+						)
+					]
+				)
+			]
+		)
+	
+
+class CleanupAgent(Thread):
+
+	def __init__(self, libURL):
+		Thread.__init__(self)
+		Log('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
+		self.libURL = libURL
+		Log('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX22222')
+		
+	def run(self):
+	
+		time.sleep(5)
+		
+		request = urllib2.Request("http://127.0.0.1:32400" + self.libURL)
+		request.get_method = lambda: 'DELETE'
+		urllib2.urlopen(request)
+		
+class HTTPBetterErrorProcessor(urllib2.HTTPErrorProcessor):
+
+	def http_response(self, request, response):
+	
+		code, msg, hdrs = response.code, response.msg, response.info()
+	
+		# was: if code not in (200, 206):
+		if not (200 <= code < 300):
+			response = self.parent.error('http', request, response, code, msg, hdrs)
+	
+		return response
+
+	https_response = http_response

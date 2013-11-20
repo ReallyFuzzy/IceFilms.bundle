@@ -6,6 +6,7 @@ import urlparse
 import copy
 import sys
 import base64
+import os
 
 from datetime       import date, datetime, timedelta
 from dateutil       import tz
@@ -26,6 +27,7 @@ from NavExObject    import CaptchaRequiredObject
 from MetaProviders  import DBProvider, MediaInfo
 from RecentItems    import BrowsedItems, ViewedItems
 from Favourites     import FavouriteItems
+from Buffer         import BufferManager
 
 cerealizer.register(MediaInfo)
 
@@ -141,6 +143,10 @@ def Start():
 	# favourites.
 	Thread.Create(StartFavouritesCheck)
 	Thread.Create(CheckAdditionalSources, sources=Site.ADDITIONAL_SOURCES)
+	
+	# Initialise Buffer manager and re-launch any suspended downloads...
+	BufferManager.instance().launch(Site.GetBufferPath())
+
 
 ####################################################################################################
 # see:
@@ -235,6 +241,17 @@ def VideoMainMenu():
 			thumb=R("Favorite.png"),
 		)
 	)
+	
+	if len(BufferManager.instance().items()) > 0:
+		oc.add(
+			DirectoryObject(
+				key=Callback(BufferMenu,parent_name=oc.title2,),
+				title=L("BufferTitle"),
+				tagline=L("BufferSubtitle"),
+				summary=L("BufferSummary"),
+				thumb=R("Favorite.png"),
+			)
+		)
 
 	oc.add(
 		PrefsObject(
@@ -515,7 +532,7 @@ def ItemsMenu(
 	
 	items = Parsing.GetItems(type, genre, sort, alpha, num_pages, start_page)
 	
-	func_name = TVSeasonMenu
+	func_name = TVShowMenu
 	
 	hist = None
 	
@@ -604,7 +621,8 @@ def ItemsMenu(
 ####################################################################################################
 # TV SEASONS MENUS
 ####################################################################################################
-def TVSeasonMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None):
+
+def TVShowMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None):
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
 	
@@ -657,7 +675,7 @@ def TVSeasonMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=
 
 	oc.add(
 		PopupDirectoryObject(
-			key=Callback(TVSeasonActionMenu, mediainfo=mediainfo, path=path, parent_name=oc.title2),
+			key=Callback(TVShowActionMenu, mediainfo=mediainfo, path=path, parent_name=oc.title2),
 			title=L("TVSeasonActionTitle"),
 			art=mediainfo.background,
 			thumb=mediainfo.poster,
@@ -697,7 +715,7 @@ def TVSeasonMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=
 		oc.add(
 			DirectoryObject(
 				key=Callback(
-					TVSeasonEpsMenu,
+					TVSeasonMenu,
 					mediainfo=mediainfo_season,
 					item_name=item['season_name'],
 					season_url=item['season_url'],
@@ -716,21 +734,21 @@ def TVSeasonMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=
 
 ####################################################################################################
 
-def TVSeasonActionMenu(mediainfo, path, parent_name=None):
+def TVShowActionMenu(mediainfo, path, parent_name=None):
 
 	oc = ObjectContainer(view_group="InfoList", title1=parent_name, title2="TV Show Actions")
 	
 	if (Prefs['watched_indicator'] != 'Disabled'):
 		oc.add(
 			DirectoryObject(
-				key=Callback(TVSeasonActionWatch, item_name=path[-1]['elem'], mediainfo=mediainfo, path=path, action="watch"),
+				key=Callback(TVShowActionWatch, item_name=path[-1]['elem'], mediainfo=mediainfo, path=path, action="watch"),
 				title="Mark Show as Watched",
 			)
 		)
 	
 		oc.add(
 			DirectoryObject(
-				key=Callback(TVSeasonActionWatch, item_name=path[-1]['elem'], mediainfo=mediainfo, path=path, action="unwatch"),
+				key=Callback(TVShowActionWatch, item_name=path[-1]['elem'], mediainfo=mediainfo, path=path, action="unwatch"),
 				title="Mark Show as Unwatched",
 			)
 		)
@@ -756,7 +774,7 @@ def TVSeasonActionMenu(mediainfo, path, parent_name=None):
 	
 ####################################################################################################
 
-def TVSeasonActionWatch(item_name=None, mediainfo=None, path=None, action="watch"):
+def TVShowActionWatch(item_name=None, mediainfo=None, path=None, action="watch"):
 
 	items = []
 	base_path = [item for item in path if ('show_url' in item)]
@@ -772,13 +790,14 @@ def TVSeasonActionWatch(item_name=None, mediainfo=None, path=None, action="watch
 		items.append([item_mediainfo, item_path])
 		
 	# Mark them as watched / unwatched.
-	return TVSeasonEpsActionWatch(item_name=item_name, items=items, action=action)
+	return TVSeasonActionWatch(item_name=item_name, items=items, action=action)
 
 
 ####################################################################################################
 # TV SEASON EPISODES MENUS
 ####################################################################################################
-def TVSeasonEpsMenu(mediainfo=None, season_url=None,item_name=None, path=[], parent_name=None):
+
+def TVSeasonMenu(mediainfo=None, season_url=None,item_name=None, path=[], parent_name=None):
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
 	
@@ -821,12 +840,15 @@ def TVSeasonEpsMenu(mediainfo=None, season_url=None,item_name=None, path=[], par
 	
 	oc.add(
 		PopupDirectoryObject(
-			key=Callback(TVSeasonEpsActionMenu, mediainfo=mediainfo, path=path, parent_name=oc.title2),
+			key=Callback(TVSeasonActionMenu, mediainfo=mediainfo, path=path, parent_name=oc.title2),
 			title=indicator + str(L("TVSeasonEpsActionTitle")),
 			thumb=mediainfo.poster,
 			art=mediainfo.background,
 		)
 	)
+	
+	buffer = BufferManager.instance()
+	pre_buffer_items = buffer.items()
 
 	for item in Parsing.GetTVSeasonEps("/" + season_url):
 	
@@ -836,7 +858,7 @@ def TVSeasonEpsMenu(mediainfo=None, season_url=None,item_name=None, path=[], par
 		ep_num = item['ep_num'] if ('ep_num' in item) else None
 		mediainfo_ep.ep_num = ep_num
 				
-		# Does this LMWT episode actually exist according to meta provider?
+		# Does this episode actually exist according to meta provider?
 		if (
 			mediainfo_meta and
 			hasattr(mediainfo_meta,'season_episodes') and 
@@ -855,43 +877,74 @@ def TVSeasonEpsMenu(mediainfo=None, season_url=None,item_name=None, path=[], par
 			watched = hist.has_been_watched(item['ep_url'])
 			indicator = '    ' if (watched) else u"\u00F8" + "  "
 		
-		oc.add(
-			DirectoryObject(
-				key=Callback(
-					SourcesMenu,
-					mediainfo=mediainfo_ep,
-					url=item['ep_url'],
-					item_name=item['ep_name'],
-					path=path,
-					parent_name=oc.title2,
-				),
-				title=indicator + mediainfo_ep.title,
-				tagline=mediainfo_ep.title,
-				summary=mediainfo_ep.summary,
-				thumb=mediainfo_ep.poster,
-				art=mediainfo_ep.background,
+		# Is the item in the pref-buffer list and finished?
+		if item['ep_url'] in pre_buffer_items and buffer.bufferItem(item['ep_url']).isFinished():
+
+			# Then, let the user choosed between seeing regular menu or just
+			# playing buffered item.
+			oc.add(
+				PopupDirectoryObject(
+					key=Callback(
+						SourcesOrBufferMenu,
+						mediainfo=mediainfo_ep,
+						url=item['ep_url'],
+						item_name=item['ep_name'],
+						path=path,
+						parent_name=oc.title2,
+					),
+					title=indicator + mediainfo_ep.title,
+					tagline=mediainfo_ep.title,
+					summary=mediainfo_ep.summary,
+					thumb=mediainfo_ep.poster,
+					art=mediainfo_ep.background,
+				)
 			)
-		)
+		
+		else:
+			oc.add(
+				DirectoryObject(
+					key=Callback(
+						SourcesMenu,
+						mediainfo=mediainfo_ep,
+						url=item['ep_url'],
+						item_name=item['ep_name'],
+						path=path,
+						parent_name=oc.title2,
+					),
+					title=indicator + mediainfo_ep.title,
+					tagline=mediainfo_ep.title,
+					summary=mediainfo_ep.summary,
+					thumb=mediainfo_ep.poster,
+					art=mediainfo_ep.background,
+				)
+			)
 			
 	return oc
 
 ####################################################################################################
 
-def TVSeasonEpsActionMenu(mediainfo, path, parent_name=None):
+def TVSeasonActionMenu(mediainfo, path, parent_name=None):
 
 	oc = ObjectContainer(view_group="InfoList", title1=parent_name, title2="Season Actions")
 	
+	oc.add(
+		DirectoryObject(
+			key=Callback(TVSeasonActionBuffer),
+			title="Pre-Buffer All Episodes",
+		)
+	)
+
 	if (Prefs['watched_indicator'] != 'Disabled'):
 		oc.add(
 			DirectoryObject(
-				key=Callback(TVSeasonEpsActionWatch, item_name=path[-1]['elem'], items=[[mediainfo, path]], action="watch"),
+				key=Callback(TVSeasonActionWatch, item_name=path[-1]['elem'], items=[[mediainfo, path]], action="watch"),
 				title="Mark All Episodes as Watched",
 			)
 		)
 	
 		oc.add(
 			DirectoryObject(
-				key=Callback(TVSeasonEpsActionWatch, item_name=path[-1]['elem'], items=[[mediainfo, path]], action="unwatch"),
+				key=Callback(TVSeasonActionWatch, item_name=path[-1]['elem'], items=[[mediainfo, path]], action="unwatch"),
 				title="Mark All Episodes as Unwatched",
 			)
 		)
@@ -915,7 +968,18 @@ def TVSeasonEpsActionMenu(mediainfo, path, parent_name=None):
 
 ####################################################################################################
 
-def TVSeasonEpsActionWatch(item_name=None, items=None, action="watch"):
+def TVSeasonActionBuffer():
+
+
+	oc = ObjectContainer()
+	oc.header = "Not Yet Implemented."
+	oc.message = ""
+	
+	return oc
+
+####################################################################################################
+
+def TVSeasonActionWatch(item_name=None, items=None, action="watch"):
 
 	episode_items = []
 	
@@ -945,7 +1009,38 @@ def TVSeasonEpsActionWatch(item_name=None, items=None, action="watch"):
 ####################################################################################################
 # SOURCES MENUS
 ####################################################################################################
-def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None, external_caller=None):
+
+def SourcesOrBufferMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None, external_caller=None, replace_parent=False):
+
+	oc = ObjectContainer(no_cache=True, view_group="List", title1=parent_name, title2="")
+
+	oc.add(
+		VideoClipObject(
+			key=BufferManager.instance().fileLoc(url),
+			rating_key=mediainfo.id,
+			title="Play Pre-Bufferred Item",
+		)
+	)
+	
+	oc.add(
+		DirectoryObject(
+			key=Callback(
+				SourcesMenu,
+				mediainfo=mediainfo,
+				url=url,
+				item_name=item_name,
+				path=path,
+				parent_name=oc.title2,
+			),
+			title="View Sources and Item Options",
+		)
+	)
+	
+	return oc
+
+####################################################################################################
+
+def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None, external_caller=None, replace_parent=False):
 	
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
 	
@@ -956,7 +1051,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 	
 	path = path + [ { 'elem': item_name, 'url': url } ]
 	
-	oc = ObjectContainer(view_group="List", title1=parent_name, title2=item_name)
+	oc = ObjectContainer(no_cache=False, view_group="List", title1=parent_name, title2=item_name)
 	
 	# Get as much meta data as possible about this item.
 	mediainfo2 = Parsing.GetMediaInfo(url, mediainfo, need_meta_retrieve(mediainfo.type))
@@ -984,7 +1079,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 	if (not external_caller):
 		oc.add(
 			PopupDirectoryObject(
-				key=Callback(SourcesActionMenu, mediainfo=mediainfo2, path=path),
+				key=Callback(SourcesActionMenu, url=url, mediainfo=mediainfo2, path=path, parent_name=oc.title2),
 				title=L("ItemSourceActionTitle"),
 				summary=mediainfo2.summary,
 				art=mediainfo2.background,
@@ -994,15 +1089,21 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 		)
 	
 	providerURLs = []
+	mediaItems = []
+	
+	# Get a list of media items for each available source.
 	for source_item in Parsing.GetSources(url):
 	
 		mediaItem = GetItemForSource(mediainfo=mediainfo2, source_item=source_item, parent_name=oc.title2)
 		
 		if mediaItem is not None and 'item' in mediaItem and mediaItem['item'] is not None:
-			oc.add(mediaItem['item'])
+			mediaItems.append(mediaItem['item'])
 			if ('url' in mediaItem and mediaItem['url'] is not None):
 				providerURLs.append(mediaItem['url'])
-				
+	
+	for mediaItem in mediaItems:
+		oc.add(mediaItem)
+		
 	if (not external_caller and len(Dict[ADDITIONAL_SOURCES_KEY]) > 0):
 		oc.add(
 			DirectoryObject(
@@ -1031,8 +1132,8 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 		
 	return oc
 
-	
 ####################################################################################################
+
 def SourcesAdditionalMenu(mediainfo):
 
 	# FIXME: This assumes only 1 additional source is available.
@@ -1056,10 +1157,19 @@ def SourcesAdditionalMenu(mediainfo):
 
 ####################################################################################################
 
-def SourcesActionMenu(mediainfo, path):
+def SourcesActionMenu(mediainfo, path, url, parent_name):
 
-	oc = ObjectContainer(view_group="InfoList", title1="", title2="")
+	oc = BufferActionMenu(url=url, mediainfo=mediainfo, path=path, parent_name=parent_name)
+	oc.no_cache = True
 	
+	if (len(oc.objects) > 1):
+		oc.add(
+			DirectoryObject(
+				key=Callback(NoOpMenu),
+				title=L("NoOpTitle")
+			)
+		)
+
 	if (mediainfo.type == "movies"):
 	
 		oc.add(
@@ -1095,7 +1205,7 @@ def SourcesActionMenu(mediainfo, path):
 				title="Add to Favourites",
 			)
 		)
-	
+		
 	if (len(oc.objects) == 0):
 		oc.add(
 			DirectoryObject(
@@ -1251,7 +1361,9 @@ def CaptchaRequiredMenu(mediainfo, source_item, url, parent_name=None, replace_p
 	)
 	
 	return oc
-	
+
+####################################################################################################
+
 def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, parent_name=None):
 
 	oc = ObjectContainer(
@@ -1314,8 +1426,8 @@ def Proxy(url):
 	#Log(url)
 	return HTTP.Request(url,headers={'User-Agent':USER_AGENT}).content
 	
-	
 ####################################################################################################
+
 def SearchResultsMenu(query, type, parent_name=None):
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
@@ -1324,7 +1436,7 @@ def SearchResultsMenu(query, type, parent_name=None):
 
 	path = [ { 'elem':'Search (' + query + ')', 'query': query }]
 	
-	func_name = TVSeasonMenu
+	func_name = TVShowMenu
 	if (type=="movies"):
 		func_name = SourcesMenu
 		
@@ -1358,10 +1470,480 @@ def SearchResultsMenu(query, type, parent_name=None):
 
 	return oc
 
+
+####################################################################################################
+# BUFFERING MENU
+####################################################################################################
+
+def BufferMenu(parent_name=None, replace_parent=False):
+
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+
+	oc = ObjectContainer(no_cache=True, view_group="InfoList", title1=parent_name, title2=L("BufferTitle"), replace_parent=replace_parent)
+	
+	buffer = BufferManager.instance()
+	items = buffer.items()
+	
+	if (len(items) == 0):
+		oc.add(
+			DirectoryObject(
+				key=Callback(NoOpMenu),
+				title= "No Pre-Buffering items found.",
+			)
+		)
 		
+		return oc
+	
+	itemsGroups = { 'Ready':[], 'Active':[], 'Queued': [], 'Stopped':[], 'No Source':[] }
+	summaries = {
+		'Ready': 'The items below are fully buffered and ready to play.',
+		'Active': 'The items below are currently buffering. Click on an item for more options.',
+		'Queued': 'The items below are currently queued to be buffered. They will begin buffering shortly after a buffering slot becomes available.',
+		'Stopped': 'The items below are currently stopped. They will not be buffered until manually resumed. Click on an item for options.',
+		'No Source': 'The items below have tried all the sources they know about and found none with a valid file. You can try again by clicking an item and selecting "Resume"',
+	}
+	# Group items into Ready, Active, Stopped and No Source groups.
+	for itemKey in items:
+	
+		item = buffer.bufferItem(itemKey)
+		if (item.isFinished()):
+			itemsGroups['Ready'].append(itemKey)
+		elif (item.isActive()):
+			itemsGroups['Active'].append(itemKey)
+		elif (item.isQueued()):
+			itemsGroups['Queued'].append(itemKey)
+		elif (item.isStopped()):
+			itemsGroups['Stopped'].append(itemKey)
+		elif (item.isNoSource()):
+			itemsGroups['No Source'].append(itemKey)
+	
+	
+	for groupKey in ['Ready', 'Active', 'Queued', 'Stopped', 'No Source']:
+	
+		if (len(itemsGroups[groupKey]) >= 1):
+		
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferMenu, parent_name=parent_name, replace_parent=True),
+					title= "-- " + groupKey + ' --',
+					summary = summaries[groupKey] + "\n\n" + "Click to refresh list",
+				)
+			)
+			
+			for itemKey in itemsGroups[groupKey]:
+			
+				adtlInfo = buffer.adtlInfo(itemKey)
+				mediainfo = MediaInfo()
+				path = []
+				
+				if (adtlInfo is not None):
+					if ('mediainfo' in adtlInfo):
+						mediainfo = adtlInfo['mediainfo']
+					if ('path' in adtlInfo):
+						path = adtlInfo['path']
+				
+				title = mediainfo.title
+				
+				if (groupKey == 'Active'):
+					# Show basic stats...
+					stats = buffer.stats(itemKey)
+					title = title + (" (%s@%s)" % (stats["timeRemainingShort"], stats["curRate"]))
+				
+				oc.add(
+					PopupDirectoryObject(
+						key=Callback(BufferActionMenu, mediainfo=mediainfo, path=path, parent_name=oc.title2, url=itemKey, show_path=True),
+						title=title,
+						summary= mediainfo.summary,
+						art=mediainfo.background,
+						thumb= mediainfo.poster,
+					)
+				)
+
+	return oc
+	
+####################################################################################################
+	
+def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=None, show_path=False):
+
+	oc = ObjectContainer(no_cache=True, view_group="InfoList", title1=parent_name, title2=L("BufferTitle"))
+	
+	buffer = BufferManager.instance()
+	
+	# If we've been given a path, add navigation back to the item.		
+	if (buffer.hasItem(url)):
+	
+		if (buffer.isReady(url)):
+
+			oc.add(
+				MovieObject(
+					url="prebuffer://" + buffer.fileLoc(url),
+					title="Play Pre-Bufferred Item"
+				)
+			)
+
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferMoveToLibMenu, url=url),
+					title="Move Item to Library",
+				)
+			)
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferDelMenu, url=url),
+					title="Delete Item",
+				)
+			)
+					
+		elif buffer.isActive(url):
+		
+			if (caller != "stats"):
+				stats = BufferManager.instance().stats(url)
+				title = "View Stats "
+				if (stats["fileSize"] == "-"):
+					title = title + "(%s)" % stats['status']
+				else:
+					title = title + ("(%s@%s)" % (stats["timeRemainingShort"], stats["curRate"]))
+				oc.add(
+					DirectoryObject(
+						key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url),
+						title=title,
+					)
+				)
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferNextSourceMenu, url=url),
+					title="Try another source",
+				)
+			)
+
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferStopMenu, url=url),
+					title="Stop",
+				)
+			)
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferStopAndDelMenu, url=url),
+					title="Stop and Delete",
+				)
+			)
+			
+		else:
+		
+			if (caller != "stats"):
+				stats = BufferManager.instance().stats(url)
+				title = "View Stats "
+				if (stats["fileSize"] == "-"):
+					title = title + "(%s)" % stats['status']
+				else:
+					title = title + ("(%s/%s)" % (stats["downloaded"], stats["fileSize"]))
+				oc.add(
+					DirectoryObject(
+						key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url),
+						title=title,
+					)
+				)
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferResumeMenu, url=url),
+					title="Resume",
+				)
+			)
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferDelMenu, url=url),
+					title="Delete",
+				)
+			)
+			
+	else:
+		# This is here purely for when called from SourceActionMenu
+		oc.add(
+			DirectoryObject(
+				key=Callback(BufferStartMenu, url=url, mediainfo=mediainfo, path=path),
+				title="Start Pre-Buffering",
+			)
+		)
+	
+	# Add path navigation back to item if requested and we have a valid path.
+	if (path is not None and len(path) >= 1 and show_path):
+		
+		oc.add(
+			DirectoryObject(
+				key=Callback(NoOpMenu),
+				title=L("NoOpTitle")
+			)
+		)
+		
+		# Grab a copy of the path we can update as we're iterating through it.
+		cur_path = list(path)
+		
+		# The path as stored in the system is top down. However, we're going to
+		# display it in reverse order (bottom up), so match that.
+		cur_path.reverse()
+			
+		for item in reversed(path):
+		
+			# When the users select this option, the selected option will automatically
+			# be re-added to the path by the called menu function. So, remove it now so
+			# we don't get duplicates.
+			if (len(cur_path) > 0):
+				cur_path.pop(0)
+						
+			# The order in which we're processing the path (bottom up) isn't the 
+			# same as how it was navigated (top down). So, reverse it to
+			# put in the right order to pass on to the normal navigation functions.
+			ordered_path = list(cur_path)
+			ordered_path.reverse()
+		
+			# Depending on the types of args present, we may end up calling different methods.
+			#
+			# If we have an item URL, take user to provider list for that URL
+			if ("url" in item):
+				callback = Callback(
+					SourcesMenu, mediainfo=mediainfo, url=item['url'], item_name=None, path=ordered_path, parent_name=oc.title2)
+				
+			# If we have a show URL, take user to season listing for that show
+			elif ("show_url" in item):
+				callback = Callback(TVShowMenu, mediainfo=mediainfo, url=item['show_url'], item_name=mediainfo.show_name, path=ordered_path, parent_name=oc.title2)
+			
+			# If we have a season URL, take user to episode listing for that season.
+			elif ("season_url" in item):
+				callback = Callback(TVSeasonMenu, mediainfo=mediainfo, season_url=item['season_url'], item_name="Season " + str(mediainfo.season), path=ordered_path, parent_name=oc.title2)
+			
+			oc.add(
+				DirectoryObject(
+					key=callback,
+					title=item['elem']
+				)
+			)
+	
+	return oc
+
+####################################################################################################
+
+def BufferStartMenu(url, mediainfo, path):
+
+	oc = ObjectContainer()
+	buffer = BufferManager.instance()
+	providerURLs = []
+	
+	# Get a list of media items for each available source.
+	for source_item in Parsing.GetSources(url):
+	
+		mediaitem = GetItemForSource(mediainfo=mediainfo, source_item=source_item, parent_name="")
+		
+		if (
+			mediaitem is not None
+			and 'item' in mediaitem 
+			and 'url' in mediaitem 
+			and isinstance(mediaitem['item'],VideoClipObject)
+			and mediaitem['url'] is not None
+		):
+			providerURLs.append({'url': mediaitem['url'], 'provider': source_item['provider_name'] })
+
+	if (len(providerURLs) > 0):
+	
+		buffer.create(url, adtlInfo={'mediainfo': mediainfo, 'path': path})
+		buffer.addSource(url, providerURLs)
+		buffer.launch(Site.GetBufferPath())
+		
+		oc.header = "Pre-Buffering Launched"
+		oc.message = "Pre-Buffering for this items has started with %s possible sources." % str(len(providerURLs))
+		
+	else:
+	
+		oc.header = "No suitable sources found"
+		oc.message = "Can not pre-buffer this item as no suitable sources have been found."
+		
+	return oc
+	
+
+####################################################################################################
+
+def BufferResumeMenu(url):
+
+	oc = ObjectContainer()
+	
+	BufferManager.instance().resume(url, Site.GetBufferPath())
+	oc.header = "Pre-Buffering resumed for this item."
+	oc.message = "Item has been added to end of pre-buffering queue."
+	
+	return oc
+
+####################################################################################################
+
+def BufferStopMenu(url):
+
+	oc = ObjectContainer()
+	
+	if (BufferManager.instance().stop(url)):
+		oc.header = "Pre-Buffering paused for this item."
+		oc.message = ""
+	else:
+		oc.header = "Stopping failed."
+		oc.message = "Download thread failed to pickup stop event.\nRestarting PMS will ensure the thread is killed."
+	
+	return oc
+
+####################################################################################################
+
+def BufferMoveToLibMenu(url):
+
+	oc = ObjectContainer()
+	oc.header = "Not Yet Implemented."
+	oc.message = ""
+	
+	return oc
+
+
+####################################################################################################
+
+def BufferDelMenu(url):
+
+	BufferManager.instance().remove(url)
+	
+	oc = ObjectContainer()
+	oc.header = "Pre-Buffered item deleted"
+	oc.message = ""
+	
+	return oc
+	
+####################################################################################################
+
+def BufferStopAndDelMenu(url):
+
+	BufferManager.instance().stopAndRemove(url)
+	
+	oc = ObjectContainer()
+	oc.header = "Pre-Buffered item deleted"
+	oc.message = ""
+	
+	return oc
+	
+####################################################################################################
+
+def BufferNextSourceMenu(url):
+
+	oc = ObjectContainer()
+	
+	if (BufferManager.instance().nextSource(url)):
+		oc.header = "Pre-Buffering source switched to new source."
+		oc.message = ""
+	else:
+		oc.header = "Source Switch Failed"
+		oc.message = "Download thread failed to pickup source switch event. Try stopping and starting download."
+		
+	return oc
+	
+####################################################################################################
+
+def BufferStatsMenu(mediainfo, parent_name, url, replace_parent=False):
+
+	oc = ObjectContainer(no_cache=True,title1=parent_name, title2="Pre-Buffering Progress",replace_parent=replace_parent)
+	
+	buffer = BufferManager.instance()
+	stats = buffer.stats(url)
+	
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
+			title="Status: %s" % stats["status"],
+			summary="Click on any item to update stats with current values.",
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+		)
+	)
+	
+	oc.add(
+		PopupDirectoryObject(
+			key=Callback(BufferActionMenu, url=url, caller="stats"),
+			title="Pre-Buffer Actions...",
+			summary="Manage pre-buffer item.",
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+		)
+	)
+			
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
+			title="Source Name: %s" % stats['provider'],
+			summary=mediainfo.summary,
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+
+		)
+	)
+
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
+			title="Downloaded: %s of %s (%s%%)" % (stats["downloaded"], stats["fileSize"], stats["percentComplete"]),
+			summary=mediainfo.summary,
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+
+		)
+	)
+
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
+			title="Time Remaining: %s" % stats["timeRemaining"],
+			summary=mediainfo.summary,
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+
+		)
+	)
+
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
+			title="Current Rate: %s" % stats["curRate"],
+			summary=mediainfo.summary,
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+
+		)
+	)
+	
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
+			title="Average Rate: %s" % stats["avgRate"],
+			summary=mediainfo.summary,
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+
+		)
+	)
+
+	
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
+			title="Active for: %s" % stats["timeElapsed"],
+			summary=mediainfo.summary,
+			art=mediainfo.background,
+			thumb= mediainfo.poster,
+
+		)
+	)
+	
+	return oc
+
 ####################################################################################################
 # HISTORY MENU
 ####################################################################################################
+
 def HistoryMenu(parent_name=None):
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
@@ -1525,12 +2107,12 @@ def HistoryNavPathMenu(mediainfo, navpath, parent_name):
 			
 		# If we have a show URL, take user to season listing for that show
 		elif ("show_url" in item):
-			callback = Callback(TVSeasonMenu, mediainfo=mediainfo, url=item['show_url'], item_name=mediainfo.show_name, path=ordered_path, parent_name=oc.title2)
+			callback = Callback(TVShowMenu, mediainfo=mediainfo, url=item['show_url'], item_name=mediainfo.show_name, path=ordered_path, parent_name=oc.title2)
 		
 		# If we have a season URL, take user to episode listing for that season.
 		elif ("season_url" in item):
 			if (Prefs['watched_grouping'] == 'Season' or Prefs['watched_grouping'] == 'Episode'):
-				callback = Callback(TVSeasonEpsMenu, mediainfo=mediainfo, season_url=item['season_url'], item_name="Season " + str(mediainfo.season), path=ordered_path, parent_name=oc.title2)
+				callback = Callback(TVSeasonMenu, mediainfo=mediainfo, season_url=item['season_url'], item_name="Season " + str(mediainfo.season), path=ordered_path, parent_name=oc.title2)
 			else:
 				continue
 		
@@ -1664,6 +2246,7 @@ def HistoryAddToFavouritesMenu(mediainfo, path, parent_name):
 ####################################################################################################
 # FAVOURITES MENUS
 ####################################################################################################
+
 def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_parent=False):
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
@@ -1900,11 +2483,11 @@ def FavouritesNavPathMenu(mediainfo=None, path=None, new_item_check=None, parent
 			
 		# If we have a show URL, take user to season listing for that show
 		elif ("show_url" in item):
-			callback = Callback(TVSeasonMenu, mediainfo=mediainfo, url=item['show_url'], item_name=mediainfo.show_name, path=ordered_path, parent_name=oc.title2)
+			callback = Callback(TVShowMenu, mediainfo=mediainfo, url=item['show_url'], item_name=mediainfo.show_name, path=ordered_path, parent_name=oc.title2)
 		
 		# If we have a season URL, take user to episode listing for that season.
 		elif ("season_url" in item):
-			callback = Callback(TVSeasonEpsMenu, mediainfo=mediainfo, season_url=item['season_url'], item_name="Season " + str(mediainfo.season), path=ordered_path, parent_name=oc.title2)
+			callback = Callback(TVSeasonMenu, mediainfo=mediainfo, season_url=item['season_url'], item_name="Season " + str(mediainfo.season), path=ordered_path, parent_name=oc.title2)
 		
 		oc.add(
 			DirectoryObject(
