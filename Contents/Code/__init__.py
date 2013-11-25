@@ -193,7 +193,7 @@ def VideoMainMenu():
 			)
 			
 	except Exception, ex:
-		Log("******** Error retrieving and processing latest version information. Exception is:\n" + str(ex))
+		Log.Exception("******** Error retrieving and processing latest version information. Exception is:\n" + str(ex))
 		
 	oc.add(
 		DirectoryObject(
@@ -1347,7 +1347,7 @@ def SourcesActionWatch(item_name=None, items=None, action="watch"):
 					watched_favs.extend(favs.watch(mediainfo, path[-1]['url']))
 			save_favourite_items(favs)
 		except Exception, ex:
-			Log(ex)
+			Log.Exception("Error marking favourite as watched")
 			pass		
 		finally:
 			Thread.ReleaseLock(FAVOURITE_ITEMS_KEY)
@@ -2263,7 +2263,7 @@ def HistoryAddToFavouritesMenu(mediainfo, path, parent_name):
 		favs.add(mediainfo, path)
 		save_favourite_items(favs)
 	except Exception, ex:
-		Log(ex)
+		Log.Exception("Error adding watched item to favourites")
 		pass		
 	finally:
 		Thread.ReleaseLock(FAVOURITE_ITEMS_KEY)
@@ -2640,7 +2640,7 @@ def FavouritesLabelAddMenu(query, mediainfo, parent_name):
 			
 		save_favourite_items(favs)
 	except Exception, ex:
-		Log(ex)
+		Log.Exception("Error adding label")
 		pass		
 	finally:
 		Thread.ReleaseLock(FAVOURITE_ITEMS_KEY)
@@ -2667,7 +2667,7 @@ def FavouritesLabelToggle(label, mediainfo, parent_name):
 		save_favourite_items(favs)
 		
 	except Exception, ex:
-		Log(ex)
+		Log.Exception("Error toggling label")
 		pass		
 	finally:
 		Thread.ReleaseLock(FAVOURITE_ITEMS_KEY)
@@ -2685,7 +2685,7 @@ def FavouritesRemoveItemMenu(mediainfo):
 		favs.remove(mediainfo)
 		save_favourite_items(favs)
 	except Exception, ex:
-		Log(ex)
+		Log.Exception("Error removing favourite ")
 		pass		
 	finally:
 		Thread.ReleaseLock(FAVOURITE_ITEMS_KEY)
@@ -2874,10 +2874,6 @@ def CheckForNewItemsInFavourite(favourite, force=False):
 def GetItemForSource(mediainfo, source_item, parent_name, part_index=None):
 	
 	media_item = Parsing.GetItemForSource(mediainfo, source_item, part_index)
-	
-	Log("*****************")
-	Log(media_item)
-	Log(part_index)
 	
 	if media_item is not None:
 	
@@ -3193,7 +3189,7 @@ def PlaybackMarkWatched(mediainfo, path):
 			watched_favs = favs.watch(mediainfo, path[-1]['url'])
 			save_favourite_items(favs)
 		except Exception, ex:
-			Log(ex)
+			Log.Exception("Erorr marking item as watched for favourite.")
 			pass
 		finally:
 			Thread.ReleaseLock(FAVOURITE_ITEMS_KEY)
