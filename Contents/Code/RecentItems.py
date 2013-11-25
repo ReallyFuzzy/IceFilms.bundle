@@ -16,6 +16,17 @@ class BrowsedItems(object):
 		while (len(self.items) > 50):
 			self.items.pop(0)
 		
+	# Append some providerURLs to an item which was previously added via add above.
+	def append(self, mediaInfo, providerURLs):
+	
+		item = self.getByID(mediaInfo.id, None, None)
+		
+		if (item is None):
+			Log("Trying to append providerURLs to a mediaInfo item which is not in the recently browsed collection.")
+			return
+		
+		item[1] = list(set(item[1] + providerURLs))
+		
 	def getCaller(self, url):
 	
 		# Look through each of our items and see if any of them has a URL
@@ -54,10 +65,7 @@ class BrowsedItems(object):
 			if (result):
 				break
 				
-		if (result):
-			return [result[0], result[2]]
-		else:
-			return None
+		return result
 
 	def __str__(self):
 	

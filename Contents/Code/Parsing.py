@@ -10,10 +10,10 @@ from xgoogle.search import GoogleSearch
 
 import Utils
 
-from NavExObject import CaptchaRequiredObject
+from NavExObject import CaptchaRequiredObject, MultiplePartObject, MultiplePartCaptchaObject
 from MetaProviders import DBProvider, MediaInfo
 
-ICEFILMS_URL = "http://icefilms.info"
+ICEFILMS_URL = "http://www.icefilms.info"
 ICEFILMS_VIDEO_URL = ICEFILMS_URL + "/ip.php?v=%s"
 ICEFILMS_SOURCES_URL = ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.php?h=374&w=631&vid=%s&img="
 ICEFILMS_AJAX = ICEFILMS_URL+'membersonly/components/com_iceplayer/video.phpAjaxResp.php'
@@ -48,7 +48,7 @@ def GetItems(type, genre = None, sort = None, alpha = None, pages = 5, start_pag
 	soup = BeautifulSoup(HTTP.Request(url).content)
 	
 	# RegEx to extract out item id.
-	id_reg_ex = re.compile("/ip.php\?v=(\d+)")
+	id_reg_ex = re.compile("/ip.php\?v=(\d+)&?")
 	
 	for item in soup.findAll("a", { 'name': 'i' }):
 	
@@ -202,7 +202,7 @@ def GetSources(url):
 
 ####################################################################################################
 
-def GetItemForSource(mediainfo, source_item):
+def GetItemForSource(mediainfo, source_item, part_index):
 	"""
 	For a given provider source for an item, return the appropriate VideoClipObject.
 		
@@ -239,32 +239,56 @@ def GetItemForSource(mediainfo, source_item):
 
 		if (providerVisible):
 		
-			# Note the special URL we return here. This a made up URL which doesn't exist in the
-			# real world, but which will be caught by a URL Service included with this plugin,
-			# which will return a MediaObject with an indrect callback as it's key.
-			#
-			# This allows us to delay looking up the provider's URL until the user actually 
-			# selects the video and prevents us from hammering IceFilms every time an item's
-			# source are shown.
-			if (captcha):
+			if (len(source_item['parts']) > 1 and part_index is None):
+			
+				if (captcha):
+					return MultiplePartCaptchaObject(
+						part_count=len(source_item['parts']),
+						title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
+					)
+				else:
+					return MultiplePartObject(
+						part_count=len(source_item['parts']),
+						title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
+					)
+					
+			elif (captcha):
+				
+				if (part_index is None):
+					part_index = 0
+				
 				return CaptchaRequiredObject(
-					url="captcha://icefilms.info/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
+					url="captcha://icefilms.info/" + source_item['id'] + "/" + source_item['parts'][part_index]['id'],
 					title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
 				)
+				
+			else:
 			
-			return VideoClipObject(
-				url="external://icefilms.info/" + source_item['id'] + "/" + source_item['parts'][0]['id'],
-				title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
-				summary=mediainfo.summary,
-				art=mediainfo.background,
-				thumb= mediainfo.poster,
-				rating = float(mediainfo.rating) if mediainfo.rating else None,
-				duration=mediainfo.duration,
-				source_title = source_item['provider_name'] ,
-				year=mediainfo.year,
-				originally_available_at=mediainfo.releasedate,
-				genres=mediainfo.genres
-			)
+				if (part_index is None):
+					part_index = 0
+				
+			
+				# Note the special URL we return here. This a made up URL which doesn't exist in the
+				# real world, but which will be caught by a URL Service included with this plugin,
+				# which will return a MediaObject with an indrect callback as it's key.
+				#
+				# This allows us to delay looking up the provider's URL until the user actually 
+				# selects the video and prevents us from hammering IceFilms every time an item's
+				# source are shown.
+
+				return VideoClipObject(
+					url="external://icefilms.info/" + source_item['id'] + "/" + source_item['parts'][part_index]['id'],
+					title=source_item['name'] + " - " + source_item['provider_name'] + " - " + source_item['quality'],
+					summary=mediainfo.summary,
+					art=mediainfo.background,
+					thumb= mediainfo.poster,
+					rating = float(mediainfo.rating) if mediainfo.rating else None,
+					duration=mediainfo.duration,
+					source_title = source_item['provider_name'] ,
+					year=mediainfo.year,
+					originally_available_at=mediainfo.releasedate,
+					genres=mediainfo.genres
+				)
 			
 	return None
 	

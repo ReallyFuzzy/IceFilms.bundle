@@ -23,7 +23,7 @@ import Notifier
 import Site
 import Utils
 
-from NavExObject    import CaptchaRequiredObject
+from NavExObject    import CaptchaBase, MultiplePartObject
 from MetaProviders  import DBProvider, MediaInfo
 from RecentItems    import BrowsedItems, ViewedItems
 from Favourites     import FavouriteItems
@@ -53,6 +53,7 @@ PREFS_ICON = 'icon-prefs.png'
 SEARCH_ICON='icon-search.png'
 MOVIE_ICON='icon-movie.png'
 TV_ICON='icon-tv.png'
+BUFFER_ICON='icon-buffer.png'
 ADDITIONAL_SOURCES_ICON='icon-additional-sources.png'
 STANDUP_ICON='icon-standup.png'
 GENRE_BASE='icon-genre'
@@ -249,7 +250,7 @@ def VideoMainMenu():
 				title=L("BufferTitle"),
 				tagline=L("BufferSubtitle"),
 				summary=L("BufferSummary"),
-				thumb=R("Favorite.png"),
+				thumb=R(BUFFER_ICON),
 			)
 		)
 
@@ -1134,6 +1135,42 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 
 ####################################################################################################
 
+def SourcesPartMenu(mediainfo, source_item, part_count, parent_name=None):
+
+	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
+	oc = ObjectContainer(view_group="List", title1=parent_name, title2="Parts")
+	providerURLs = []
+	
+	for cnt in range(0, part_count):
+	
+		item = GetItemForSource(
+			mediainfo=mediainfo,
+			source_item=source_item, 
+			parent_name=oc.title2,
+			part_index=cnt
+		)
+			
+		if item is not None and 'item' in item and item['item'] is not None:
+		
+			item['item'].title = "Part %s" % (cnt + 1)
+			oc.add(item['item'])
+			
+			if ('url' in item and item['url'] is not None):
+			
+				providerURLs.append(item['url'])
+				
+	# Add our providerURLs to existing list.
+	if (Data.Exists(BROWSED_ITEMS_KEY)):
+	
+		browsedItems =  cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY))
+		browsedItems.append(mediainfo, providerURLs)
+		Data.Save(BROWSED_ITEMS_KEY, cerealizer.dumps(browsedItems))
+		
+	return oc
+	
+####################################################################################################
+
 def SourcesAdditionalMenu(mediainfo):
 
 	# FIXME: This assumes only 1 additional source is available.
@@ -1565,7 +1602,7 @@ def BufferMenu(parent_name=None, replace_parent=False):
 	
 def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=None, show_path=False):
 
-	oc = ObjectContainer(no_cache=True, view_group="InfoList", title1=parent_name, title2=L("BufferTitle"))
+	oc = ObjectContainer(no_cache=True, view_group="InfoList", title1=parent_name, title2=L("BufferTitle") + " Actions")
 	
 	buffer = BufferManager.instance()
 	
@@ -2834,13 +2871,35 @@ def CheckForNewItemsInFavourite(favourite, force=False):
 # Params:
 #   mediainfo: A MediaInfo item for the current item being viewed (either a movie or single episode).
 #   item:  A dictionary containing information for the selected source for the item being viewed.
-def GetItemForSource(mediainfo, source_item, parent_name):
+def GetItemForSource(mediainfo, source_item, parent_name, part_index=None):
 	
-	media_item = Parsing.GetItemForSource(mediainfo, source_item)
+	media_item = Parsing.GetItemForSource(mediainfo, source_item, part_index)
+	
+	Log("*****************")
+	Log(media_item)
+	Log(part_index)
 	
 	if media_item is not None:
 	
-		if (isinstance(media_item,CaptchaRequiredObject)):
+		if (isinstance(media_item, MultiplePartObject)):
+		
+			title = media_item.title + " (Multi-part"
+			if (isinstance(media_item, CaptchaBase)):
+				title = title + ", Captcha"
+			title = title + ")"
+			
+			return {
+				'item':
+					PopupDirectoryObject(
+						key = Callback(SourcesPartMenu, mediainfo=mediainfo, source_item=source_item, part_count=media_item.part_count, parent_name=parent_name),
+						title = title,
+						summary= mediainfo.summary,
+						art=mediainfo.background,
+						thumb= mediainfo.poster,
+					),
+			}
+	
+		elif (isinstance(media_item, CaptchaBase)):
 		
 			return {
 				'item':
@@ -3102,7 +3161,7 @@ def PlaybackStartedExternal(id, season_num=None, ep_num=None):
 		return ""
 	
 	# Process and mark as watched.
-	PlaybackMarkWatched(item[0], item[1])
+	PlaybackMarkWatched(item[0], item[2])
 
 ####################################################################################################
 
