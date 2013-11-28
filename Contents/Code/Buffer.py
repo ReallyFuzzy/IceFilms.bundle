@@ -664,7 +664,7 @@ class BufferItem(object):
 						if (part['size'] != part['downloaded']):
 							allOk = False
 							break
-					allOk = True		
+					
 					if (allOk):
 						Log('*** Finished Download...')
 						source['status'] = 'FINISHED'
@@ -750,10 +750,7 @@ class BufferItem(object):
 		# Quick check to see if user has asked us to stop....		
 		if (not self.okToDownload()):
 			return
-		
-		Log('XXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
-		Log(source)
-		
+				
 		# We're either re-picking a source or starting for first time.
 		# Either way, clean up object state and any previous download 
 		# files we may have left lying around.
@@ -943,7 +940,7 @@ class BufferItem(object):
 		fd = os.open(outFile, os.O_RDWR|os.O_CREAT )
 		outputObj = os.fdopen(fd, fdOpenFlags)
 	
-		while True and self.currentPart['downloaded'] < 5 * 1024 * 1024:
+		while True:
 		
 			if (not self.okToDownload() or not self.okToUseSource()):
 				break

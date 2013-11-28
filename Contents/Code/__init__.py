@@ -1838,7 +1838,7 @@ def BufferStartMenu(url, mediainfo, path):
 			if item and isinstance(item, VideoClipObject):
 				itemUrls.append(item.url)
 		
-		if len(itemUrls) > 1:
+		if len(itemUrls) > 0:
 			providers.append(
 				{ 'provider': source_item['provider_name'], 'parts': itemUrls }
 			)	
