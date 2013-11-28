@@ -25,7 +25,7 @@ def MediaObjectsForURL(url):
 @indirect
 def PlayVideo(url):
 
-	filePath = url.replace("prebuffer://","")
+	file = url.replace("prebuffer://","")
 	
 	# Welcome to crazy town....
 	#
@@ -44,22 +44,8 @@ def PlayVideo(url):
 	# machine. Remaining clients (which will ask for the file to be transcoded since we don't know
 	# anything about the buffered item), do support a file:// URL but only if it doesn't contain
 	# space, which won't be the case for us due to where we save the buffered items.
-	
-	# Create a tmp folder.
-	#tempPath = tempfile.mkdtemp()
-	#tempFile = tempPath + "/play.m4v"
-	#
-	#Log(tempPath)
-	#Log(filePath)
-	
-	tempPath =  os.path.dirname(filePath)
 
-	# The fake extension is so that Plex's File scanner picks up our file.
-	tempFile = filePath + ".m4v" 
-	
-	# Create a symlink back to the file.
-	if not os.path.isfile(tempFile):
-		os.link(filePath, tempFile)
+	filePath = os.path.dirname(file)
 	
 	# Create a library for the tmp folder above.
 	#
@@ -72,7 +58,7 @@ def PlayVideo(url):
 		"&agent=com.plexapp.agents.none" +
 		"&scanner=Plex+Video+Files+Scanner" +
 		"&language=xn" +
-		"&location=" + urllib.quote_plus(tempPath) +
+		"&location=" + urllib.quote_plus(filePath) +
 		"&name=PreBuffer+Play",
 	)
 	
@@ -94,12 +80,11 @@ def PlayVideo(url):
 		# Get the play ID of the item and send that to client.
 		request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/all")
 		response = opener.open(request)
-	
-	
+		
 		# Look for the one and only media item in there with our name.
 		content = response.read()
 		elem = XML.ElementFromString(content)
-		partElems = elem.xpath("//Part[@file='%s']" % tempFile)
+		partElems = elem.xpath("//Part[@file='%s']" % file)
 	
 		if (len(partElems) > 0):
 			fileURL = partElems[0].get("key")
