@@ -869,7 +869,7 @@ class BufferItem(object):
 		
 		# Create a file for this part.
 		if part['file'] is None:
-			part['file'] = os.path.join(self.item['outputDir'], str(uuid.uuid4()))
+			part['file'] = os.path.join(self.item['outputDir'], "%s.mov" % str(uuid.uuid4()))
 			Log('*** Set file loc to %s' % part['file'])
 			
 		if os.path.isfile(part['file']):
@@ -937,7 +937,12 @@ class BufferItem(object):
 		meta = stream.info()
 		
 		# Long winded way to get a file handle since Plex doesn't trust us with open().
-		fd = os.open(outFile, os.O_RDWR|os.O_CREAT )
+		fdFlags = os.O_RDWR|os.O_CREAT
+		if hasattr(os, 'O_BINARY'):
+			Log('*** Setting binary flag.')
+			fdFlags = fdFlags | os.O_BINARY
+			
+		fd = os.open(outFile, fdFlags)
 		outputObj = os.fdopen(fd, fdOpenFlags)
 	
 		while True:
