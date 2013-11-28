@@ -1018,13 +1018,23 @@ def SourcesOrBufferMenu(mediainfo=None, url=None, item_name=None, path=[], paren
 
 	oc = ObjectContainer(no_cache=True, view_group="List", title1=parent_name, title2="")
 
-	oc.add(
-		VideoClipObject(
-			key=BufferManager.instance().fileLoc(url),
-			rating_key=mediainfo.id,
-			title="Play Pre-Bufferred Item",
+	buffer = BufferManager.instance()
+	
+	part_count = buffer.partCount(url)
+		
+	for cnt in range(0, part_count):
+	
+		title = "Play Pre-Bufferred Item"
+		
+		if (part_count > 1):
+			title = "Play Pre-Bufferred Part %s of %s" % (cnt + 1, part_count)
+			
+		oc.add(
+			MovieObject(
+				url="prebuffer://" + buffer.fileLoc(url, cnt),
+				title=title
+			)
 		)
-	)
 	
 	oc.add(
 		DirectoryObject(
