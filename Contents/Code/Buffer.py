@@ -2,14 +2,24 @@ import cerealizer
 import uuid
 import os
 import socket
+import shutil
+
 from urllib2 import HTTPError
 
 
+		
+###################################################################################################
+# BUFFER MANAGER
+###################################################################################################
+
 class BufferManager(object):
 
-	ITEMS_KEY = "BUFFER_ITEMS_KEY"
-	RUN_KEY = "BUFFER_RUN_KEY"
-	DOWNLOAD_KEY = "BUFFER_DOWNLOAD_KEY"
+	ITEMS_KEY = 'BUFFER_ITEMS_KEY'
+	RUN_KEY = 'BUFFER_RUN_KEY'
+	DOWNLOAD_KEY = 'BUFFER_DOWNLOAD_KEY'
+	KEEPALIVE_KEY = 'BUFFER_KEEPALIVE_KEY'
+	DOWNLOAD_ACTIVE_KEY = 'BUFFER_DOWNLOAD_ACTIVE_KEY'
+	
 	INSTANCE = None
 	
 	@staticmethod
@@ -17,11 +27,7 @@ class BufferManager(object):
 			
 		# FIXME: Should be synchronised.
 		if (BufferManager.INSTANCE is None):
-			Log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-			Log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-			Log("CREATING INSTANCE")
-			Log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-			Log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+			Log('XXX THREAD XXX: CREATING INSTANCE')
 		
 			BufferManager.INSTANCE = BufferManager(doNotManuallyInstantiate=False)
 			
@@ -30,14 +36,20 @@ class BufferManager(object):
 	def __init__(self, doNotManuallyInstantiate=True):
 	
 		if (doNotManuallyInstantiate):
-			raise Exception("Object should be treated as singleton. Use Buffer.instance() to get instance")
+			raise Exception('Object should be treated as singleton. Use Buffer.instance() to get instance')
 		
-		Log("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-		Log("INIT")
+		Log('XXX THREAD XXX: INIT')
 		Log(self.items())
 		
 		self.bufferItems = {}
+		self.savePath = None
+		self.keepAliveUrl = None
 	
+	def setPrefs(self, savePath, keepAliveUrl):
+	
+		self.savePath = savePath
+		self.keepAliveUrl = keepAliveUrl
+		
 	def hasItem(self, url):
 	
 		return self.item(url) is not None
@@ -45,24 +57,43 @@ class BufferManager(object):
 	def isReady(self, url):
 	
 		item = self.item(url)
-		return item is not None and item['currentStatus'] == "FINISHED"
+		return item is not None and item['currentStatus'] == 'FINISHED'
 		
 	def isActive(self, url):
 	
-		return self.hasItem(url) and   self.bufferItem(url).isActive()
+		return self.hasItem(url) and self.bufferItem(url).isActive()
 		
-	def fileLoc(self, url):
+	def isQueued(self, url):
+	
+		return self.hasItem(url) and self.bufferItem(url).isQueued()
+		
+	def partCount(self, url):
 	
 		item = self.item(url)
-		if (item is not None and item['outputFile'] is not None):
-			return item['outputFile']
-		else:
-			return None
+		
+		sources = [source for source in item['sources'] if source['status'] == 'FINISHED']
+		
+		if len(sources) == 1:
+			return len(sources[0]['parts'])
+		
+	def fileLoc(self, url, partIndex):
+	
+		item = self.item(url)
+		
+		if (item is not None and item['outputDir'] is not None):
+		
+			sources = [source for source in item['sources'] if source['status'] == 'FINISHED']
+			
+			if len(sources) == 1:
+			
+				return os.path.join(item['outputDir'], sources[0]['parts'][partIndex]['file'])
+	
+		return None
 			
 	def adtlInfo(self, url):
 	
-		if (self.hasItem(url) and "adtlInfo" in self.item(url)):
-			 return cerealizer.loads(self.item(url)["adtlInfo"])
+		if (self.hasItem(url) and 'adtlInfo' in self.item(url)):
+			 return cerealizer.loads(self.item(url)['adtlInfo'])
 		else:
 			return None
 		
@@ -76,27 +107,34 @@ class BufferManager(object):
 		self.items()[url] = self.bufferItems[url].dict()
 		
 		# And add a serialised version of any additional info caller wanted us to store.
-		self.items()[url]["adtlInfo"] = cerealizer.dumps(adtlInfo)
+		self.items()[url]['adtlInfo'] = cerealizer.dumps(adtlInfo)
 		
-	def addSource(self, url, sources):
+	def addSources(self, url, sources):
 	
 		bufferItem = self.bufferItem(url)
-		bufferItem.addSource(sources)
+		bufferItem.addSources(sources)
 		return
 	
-	def resume(self, url, savePath):
+	def resume(self, url):
 	
 		self.bufferItem(url).makeStartable()
 		Dict.Save()
-		self.launch(savePath)
+		self.launch()
 
 	def stop(self, url):
 	
-		Thread.Block("DOWNLOAD_OK")
+		res = True
+		item = self.bufferItem(url)
 		
-		# Wait up to 10 secs to see if the thread correctly picks up the signal.
-		res = Thread.Wait("DOWNLOAD_OK", 10)
+		if (item.isActive()):
+		
+			Thread.Block('DOWNLOAD_OK_%s' % item.id())
+		
+			# Wait up to 10 secs to see if the thread correctly picks up the signal.
+			res = Thread.Wait('DOWNLOAD_OK_%s' % item.id(), 10)
 
+		item.stop()
+		
 		Dict.Save()
 
 		return res
@@ -115,73 +153,86 @@ class BufferManager(object):
 	
 	def nextSource(self, url):
 	
-		Thread.Block("CURRENT_SOURCE_OK")
+		itemId = self.item(url)['id']
 		
-		# Wait up to 5 secs to see if the thread correctly picks up the signal.
-		return Thread.Wait("CURRENT_SOURCE_OK", 5)
+		Thread.Block('CURRENT_SOURCE_OK_%s' % itemId)
+		
+		# Wait up to 10 secs to see if the thread correctly picks up the signal.
+		return Thread.Wait('CURRENT_SOURCE_OK_%s' % itemId, 10)
 		
 		
 	def stats(self, url, itemDuration=None):
 	
-		item = self.item(url)
+		item = self.bufferItem(url).stats()
+		
 		stats = {}
 		
-		stats['status'] = item['currentStatus']
-		
-		if (item['fileSize'] is not None and item['fileSize'] > 0):
-			stats['fileSize'] = self.humanizeFileSize(item['fileSize'])
-		else:
-			stats['fileSize'] = "-"
-			
-		stats['percentComplete'] = "-"
-		stats['downloadRemaing'] = "-"
-		
-		if (item['totalDownloaded'] is not None and item['totalDownloaded'] > 0):
-		
-			stats['downloaded'] = self.humanizeFileSize(item['totalDownloaded'])
-			Log(item)
-			stats['downloadRemaining'] = self.humanizeFileSize(item['fileSize'] - item['totalDownloaded'])
-			Log(stats)
-			if (item['percentComplete'] is not None):
-				stats['percentComplete'] = round(item['percentComplete'] * 100, 1)
-			
-		else:
-			stats['downloaded'] = '-'
-			
-		if (item['totalDownloadTime'] is not None and item['totalDownloadTime'] > 0):
-			stats['timeElapsed'] = self.humanizeTimeLong(int(item['totalDownloadTime']), "seconds", 3)
-		else:
-			stats['timeElapsed'] = '-'
-			
-		stats["avgRate"] = self.humanizeFileSize(item['avgRate']) + "/s"
-
 		# Some defaults.
-		stats["curRate"] = "-"
-		stats["timeRemaining"] = "-"
-		stats["timeRemainingShort"] = "-"
-		stats["provider"] = "-"
-		stats["safeToPlay"] = False
+		stats['fileSize'] = '-'
+		stats['downloaded'] = '-'
+		stats['downloadRemaining'] = '-'
+		stats['curRate'] = '-'
+		stats['avgRate'] = '-'
+		stats['percentComplete'] = '-'
+		stats['timeElapsed'] = '-'
+		stats['timeRemaining'] = '-'
+		stats['timeRemainingShort'] = '-'
+		stats['provider'] = '-'
+		stats['partCount'] = 0
+		stats['partCurrent'] = '-'
 		
-		if (item['currentStatus'] == "ACTIVE" and item['currentSource'] is not None):
-			
-			stats["curRate"] = self.humanizeFileSize(item['curRate']) + "/s"
-			stats["timeRemaining"] = self.humanizeTimeLong(int(item['timeRemaining']), "seconds", 3)
-			stats["timeRemainingShort"] = self.humanizeTimeShort(int(item['timeRemaining']), "s", 2)
-			stats["provider"] = item['sources'][item['currentSource']]['provider']
-						
-			#Log("PC: %s, PR: %s, BR: %s (%s)" % (item['percentComplete'], item['percentRemaining'], item['bytesRemaining'],  self.humanizeFileSize(item['bytesRemaining'])))
-			#Log("TRAR: %s (%s)" % (item['timeRemainingAvgRate'], self.humanizeTime(int(item['timeRemainingAvgRate']), "seconds")))
-			#Log("TRCR: %s (%s)" % (item['timeRemainingCurRate'], self.humanizeTime(int(item['timeRemainingCurRate']), "seconds")))
-			#Log("TR: %s (%s)" % (item['timeRemaining'], self.humanizeTime(int(item['timeRemaining']), "seconds")))
+		stats['safeToPlay'] = False
+		
+		stats['status'] = item['status']
+		
+		if (item['totalDownloadSize'] is not None and item['totalDownloadSize'] > 0):
+			stats['fileSize'] = self.humanizeFileSize(item['totalDownloadSize'])
 
-			if (itemDuration is not None):
+		if (item['totalDownloaded'] is not None and item['totalDownloaded'] > 0):
+			stats['downloaded'] = self.humanizeFileSize(item['totalDownloaded'])
 			
+		if (
+			item['totalDownloadSize'] is not None and item['totalDownloadSize'] > 0 and
+			item['totalDownloaded'] is not None and item['totalDownloaded'] > 0
+		):
+			stats['downloadRemaining'] = self.humanizeFileSize(item['totalDownloadSize'] - item['totalDownloaded'])
+			
+		if (item['percentComplete'] is not None and item['percentComplete'] > 0):
+			stats['percentComplete'] = round(item['percentComplete'] * 100, 1)
+					
+		if (item['totalDownloadTime'] is not None and item['totalDownloadTime'] > 0):
+			stats['timeElapsed'] = self.humanizeTimeLong(int(item['totalDownloadTime']), 'seconds', 3)
+		
+		if (item['avgRate'] is not None and item['avgRate'] > 0):
+			stats['avgRate'] = self.humanizeFileSize(item['avgRate']) + '/s'
+
+		if (item['status'] == 'ACTIVE'):
+			
+			stats['provider'] = item['provider']
+			
+			if (item['partCount'] is not None):
+				stats['partCount'] = item['partCount']
+				
+			if (item['partCurrent'] is not None):
+				stats['partCurrent'] = item['partCurrent']
+			
+			if (item['curRate'] is not None and item['curRate'] > 0):
+				stats['curRate'] = self.humanizeFileSize(item['curRate']) + '/s'
+			
+			if (item['timeRemaining'] is not None and item['timeRemaining'] > 0):
+				stats['timeRemaining'] = self.humanizeTimeLong(int(item['timeRemaining']), 'seconds', 3)
+				stats['timeRemainingShort'] = self.humanizeTimeShort(int(item['timeRemaining']), 's', 2)
+			
+			if (
+				itemDuration is not None and
+				item['percentRemaining'] is not None and item['percentRemaining'] > 0
+			):
 				itemDurationRemaining = item['percentRemaining'] * itemDuration
 				# See if item is safe to play (i.e: we've already buffered enough of the
 				# item such that it will finish downloading before we catchup to it).
 				# Note the majoration of timeRemaining by 5% to give ourselves a little more
 				# safe room.
-				stats["safeToPlay"] = itemDurationRemaining > (item['timeRemaining'] * 1.05)
+				stats['safeToPlay'] = itemDurationRemaining > (item['timeRemaining'] * 1.05)
 		
 		return stats
 		
@@ -194,6 +245,8 @@ class BufferManager(object):
 				
 	def items(self):
 	
+		#Dict[BufferManager.ITEMS_KEY] = {}
+		
 		if (BufferManager.ITEMS_KEY not in Dict):
 			Dict[BufferManager.ITEMS_KEY] = {}
 			
@@ -215,9 +268,9 @@ class BufferManager(object):
 	
 		for x in ['bytes','KB','MB','GB']:
 			if num < 1024.0 and num > -1024.0:
-				return "%3.1f%s" % (num, x)
+				return '%3.1f%s' % (num, x)
 			num = num / 1024.0
-		return "%3.1f%s" % (num, 'TB')
+		return '%3.1f%s' % (num, 'TB')
 	
 	def humanizeTimeShort(self, amount, units, precision):
 	
@@ -232,7 +285,7 @@ class BufferManager(object):
 		result = self.humanizeTime(names, amount, units)
 				
 		# Only show 2 most relevant scales.
-		resStr = ""
+		resStr = ''
 		for item in result[0:precision]:
 			resStr = resStr + str(item[0]) + item[1]
 		
@@ -251,9 +304,9 @@ class BufferManager(object):
 		result = self.humanizeTime(names, amount, units)
 				
 		# Only show 2 most relevant scales.
-		resStr = ""
+		resStr = ''
 		for item in result[0:precision]:
-			resStr = resStr + str(item[0]) + " " + item[1] + " "
+			resStr = resStr + str(item[0]) + ' ' + item[1] + ' '
 		
 		return str(resStr).strip()
 		
@@ -276,22 +329,20 @@ class BufferManager(object):
 		
 	# Launch the overall download manager in a separate thread.
 	# Launch through here to ensure only one instance ever runs.
-	def launch(self, savePath):
+	def launch(self):
 	
 		Dict.Save()
 		semaphore = Thread.Semaphore(BufferManager.RUN_KEY)
 		if (semaphore.acquire(False)):
-			Log("*******************************")
-			Log("Launch buffering")
-			Thread.Create(self.run, savePath=savePath)
+			Log('XXX THREAD XXX: Launch buffering')
+			Thread.Create(self.run, savePath=self.savePath, keepAliveUrl=self.keepAliveUrl)
 		else:
-			Log("*******************************")
-			Log("Did not Launch buffering as already running.")
+			Log('XXX THREAD XXX: Did not Launch buffering as already running.')
 				
-	def run(self, savePath):
+	def run(self, savePath, keepAliveUrl):
 	
 		try:
-		
+						
 			while (True):
 			
 				# Whilst we have items to download....
@@ -299,33 +350,38 @@ class BufferManager(object):
 				itemToDownload = None
 				
 				for itemKey in self.items():
-					if (self.bufferItem(itemKey).isStartable()):
-						itemToDownload = itemKey
+					itemToDownload = self.bufferItem(itemKey)
+					if itemToDownload.isStartable():
 						break
+					else:
+						itemToDownload = None
 				
 				if (itemToDownload):
-					semaphore = Thread.Semaphore(BufferManager.DOWNLOAD_KEY, int(Prefs["max_concurrent_buffers"]))
+					Log('XXX THREAD XXX: Allowed up to %s concurrent downloads.' % Prefs['max_concurrent_buffers'])
+					semaphore = Thread.Semaphore(BufferManager.DOWNLOAD_KEY, int(Prefs['max_concurrent_buffers']))
 					if (semaphore.acquire(False)):
-						Log("*******************************")
-						Log("Launching download thread....")
+					
+						# Try to launch keep alive thread.
+						if Thread.Semaphore(BufferManager.KEEPALIVE_KEY).acquire(False):
+							Log('XXX THREAD XXX: Launching keep alive thread (%s).' % keepAliveUrl)
+							Thread.Create(self.keepAlive, url=keepAliveUrl)
+
+						Log('XXX THREAD XXX: Launching download thread....')
 						Thread.Create(self.download, item=itemToDownload, savePath=savePath)
 						Thread.Sleep(5)
 					else:
 						# Looks like the queue is currently full.
 						# Wait X seconds before trying again.
-						Log("*******************************")
-						Log("Download queue is full. Sleeping.")
+						Log('XXX THREAD XXX: Download queue is full. Sleeping.')
 						Thread.Sleep(15)
 				else:
 					# We don't currently have any items to download.
 					# Check again in X seconds.
-					Log("*******************************")
-					Log("No more items to download. Sleeping.")
+					Log('XXX THREAD XXX: No more items to download. Sleeping.')
 					break
 			
 		finally:
-			Log("*******************************")
-			Log("Releasing.........")
+			Log('XXX THREAD XXX: Finished buffering.')
 			semaphore = Thread.Semaphore(BufferManager.RUN_KEY)
 			semaphore.release()
 			
@@ -333,30 +389,125 @@ class BufferManager(object):
 	def download(self, item, savePath):
 	
 		try:
-			Log("*******************************")
-			Log("Starting download for item: " + str(item))
-			Thread.Unblock("DOWNLOAD_OK")
-			Thread.Unblock("CURRENT_SOURCE_OK")
-			self.bufferItem(item).download(savePath)
-			Log("*******************************")
-			Log("Ending download for item: " + str(item))
+			Log('*** Starting download for item: %s ' % item)
+			Thread.Unblock('DOWNLOAD_OK_%s' % item.id())
+			Thread.Unblock('CURRENT_SOURCE_OK_%s' % item.id())
 			
+			# Launch a thread to continually save the Dict in case the plugin gets
+			# killed by plex and to poll the plugin to try and prevent the plugin
+			# getting killed.
+			try:
+				item.download(savePath)
+			finally:
+				Thread.Unblock('DOWNLOAD_OK_%s' % item.id())
+				Thread.Unblock('CURRENT_SOURCE_OK_%s' % item.id())
+				
 		finally:
-			semaphore = Thread.Semaphore(BufferManager.DOWNLOAD_KEY)
-			semaphore.release()
+			Log('*** Ending download for item: %s' % item)
+			# Release our download slot.
+			Thread.Semaphore(BufferManager.DOWNLOAD_KEY).release()
 	
-	
+	'''
+		Periodically save the Dict so that stats are more or less up-to-date should something
+		bad happen to our python environment (like getting killed by the Plex server).
+		
+		Also try to make sure nothing bad happens to our Plex environment by polling a plugin
+		provided URL which should keep it alive.
+	'''
+	def keepAlive(self, url):
+		
+		sleepCnt = 0
+		
+		try:
+		
+			while (True):
+			
+				# Sleep for 1 minute.
+				sleepCnt = sleepCnt + 1
+				Thread.Sleep(60)
+				
+				# Save Dict.
+				Dict.Save()
+				
+				# Has it been more than 10 mins since we last pinged the plugin?
+				if (sleepCnt >= 10):
+				
+					sleepCnt = 0
+					
+					# Is the signal set indicating download threads are active?
+					if not Thread.Wait(BufferManager.DOWNLOAD_ACTIVE_KEY, 0):
+					
+						# Yup, clear it.
+						Thread.Unblock(BufferManager.DOWNLOAD_ACTIVE_KEY)
+						
+						Log('*** Keep-Alive (%s)!' % url)
+						
+						# Request ping page from plugin.
+						try:
+							request = urllib2.Request(url)
+							response = urllib2.urlopen(request).read()
+						except Exception, ex:
+							Log.Exception("*** Error keeping plugin alive.")
+							pass
+			
+					else:
+						# Nope. Looks like we're done for the time being.
+						Log('*** Nothing to keep-alive. Terminating')
+						break
+					
+		finally:
+			Thread.Semaphore(BufferManager.KEEPALIVE_KEY).release()
+		
+		
+###################################################################################################
+# BUFFER ITEM
+###################################################################################################
+
+'''
+Basic class that represents all the information for an item that needs to be buffered.
+All information which needs to be persisted across thread relaunch needs to go in item dict which
+will get saved in Plex's Dict().
+
+Class / Dict structure:
+
+	BufferItem:
+		item: {
+			id,
+			currentStatus,
+			sources: [
+				{
+					id,
+					status,
+					provider,
+					parts: [
+						{
+							unresolvedUrl,
+							finalUrl,
+							size,
+							file
+						}
+					]
+				}
+			],
+			currentSource,
+			outputDir,
+			curRateTarger,
+		},
+		blockTargetTime,
+		curDownloadStats,
+		lastDownloadTime
+'''
 class BufferItem(object):
 
-	PLEX_URL = "http://127.0.0.1:32400"
+	PLEX_URL = 'http://127.0.0.1:32400'
 	BLOCK_SIZE = 8192
 	
 	def __init__(self, item):
 	
 		self.blockTargetTime = 0
-		self.curDownloaded = 0
-		self.curDownloadTime = 0
+		self.curDownloadStats = []
 		self.lastDownloadTime = 0
+		self.currentPart = None
 		
 		# Item is a dictionary backed by Plex's Dict().
 		# We're using it to share state back to other parts of the system.
@@ -365,352 +516,670 @@ class BufferItem(object):
 		if (len(item) == 0):
 		
 			item['id'] = str(uuid.uuid4())
-			item['sources'] = {}
-			item['outputFile'] = None
+			item['currentStatus'] = 'ADDED'
+			
+			item['sources'] = []
 			item['currentSource'] = None
-			item['currentStatus'] = "ADDED"
 			
-			item['curRate'] = 0
-			item['avgRate'] = 0
-			item['curRateTarget'] = 0
+			item['outputDir'] = None
 			
-			item['fileSize'] = 0
-			item['totalDownloaded'] = 0
-			item['totalDownloadTime'] = 0
-			
-			item['percentComplete'] = 0.0
-			item['percentRemaining'] = 0.0
-			item['timeRemaining'] = 0
-			item['timeRemainingCurRate'] = 0
-			item['timeRemainingAvgRate'] = 0
-			item['bytesRemaining'] = 0
-			
+			item['curRateTarget'] = -1
+						
 		elif self.isActive():
 		
 			# We've just been restored from stored state.
 			# We can't be active yet.
 			item['currentStatus'] = 'SUSPENDED'
-			    
+	
+	def id(self):
+		
+		return self.item['id']
+		
 	def dict(self):
 	
 		return self.item
+	
+	
+	'''
+		Add different sources for this item.
+	'''
+	def addSources(self, sources):
+	
+		Log('*** Adding sources...')
 		
+		# Create a new source dict for each given source.
+		for source in sources:
+		
+			Log('*** Adding provider as source %s' % source['provider'])
+			
+			item = {
+				'status': 'NEW',
+				'id': str(uuid.uuid4()),
+				'parts': [],
+				'provider': source['provider']
+			}
+			
+			# Each url for the given source gets its own little object.
+			# This makes it easier to track multiple part sources.
+			for url in source['parts']:
+			
+				part = {
+					'unresolvedUrl': url,
+					'finalUrl': None,
+					'size': -1,
+					'file': None,
+					'downloaded': -1,
+					'downloadTime': -1,
+				}
+				
+				item['parts'].append(part)
+				
+			Log('*** Final source: %s' % item)
+			self.item['sources'].append(item)
+						
+		
+	'''
+		Create the output directory for this bufferItem if it doesn't already exists.
+		Will re-throw any exceptions it encounters.
+	'''
+	def setupOutputDir(self, savePath):
+	
+		if self.item['outputDir'] is None:
+			self.item['outputDir'] = os.path.join(savePath, self.item['id'])
+		
+		if (not os.path.isdir(self.item['outputDir'])):
+			try:
+				os.mkdir(self.item['outputDir'])
+				Log("*** Set source's outputDir to %s" % self.item['outputDir'])
+			
+			except Exception, ex:
+				Log.Exception('*** Error whilst creating output folder. Aborting download.')
+				self.item['outputDir'] = None
+				raise ex
+
+	
+	'''
+		Start downloading this item, or at least try to.
+		
+		This will loop through each source and each of it's part and tries to download it.
+		This will catch thread events to either STOP the download or change source.
+	'''
 	def download(self, savePath):
 	
+		self.setupOutputDir(savePath)
+		
 		# Whilst we're not finished, haven't been told to stop and still have sources to try...
 		while (
-			self.item['currentStatus'] != "STOPPED"
-			and self.item['currentStatus'] != "FINISHED"
-			and self.item['currentStatus'] != "NO_SOURCE"
+			self.item['currentStatus'] != 'STOPPED'
+			and self.item['currentStatus'] != 'FINISHED'
+			and self.item['currentStatus'] != 'NO_SOURCE'
 		):
-		
+			
+			#self.item['curRateTarget'] = 2 * 1024
+			
 			# Based on the given rate, time each block should take.
 			self.blockTargetTime = 0
 			if (self.item['curRateTarget'] > 0):
 				self.blockTargetTime = 1.0 / (float(self.item['curRateTarget']) / BufferItem.BLOCK_SIZE)
 		
-			self.pickSource()
-			self.lastDownloadTime = None
-			Dict.Save()
+			# Pick a source to download item from.
+			source = self.pickSource()
 			
+			# Stop if user has asked to stop download.
 			if not self.okToDownload():
 				break
+									
+			if (source is not None):
 			
-			if self.item['outputFile'] is None:
-				self.item['outputFile'] = os.path.join(savePath, self.item['id'])
-	
-			outputPath = self.item['outputFile']
-					
-			if (self.item["currentSource"] is not None):
-			
-				source = self.item['sources'][self.item['currentSource']]
+				Log('*** Starting download of source: %s' % source)
 				
-				self.item['currentStatus'] = "ACTIVE"
+				self.lastDownloadTime = None
+				self.item['currentSource'] = source['id']
+				self.item['currentStatus'] = 'ACTIVE'
+				source['status'] = 'ACTIVE'
 				
-				# Opener for the file.
-				opener = urllib2.build_opener()
+				Dict.Save()
+													
+				# Loop through each part in the source.
+				for part in source['parts']:
 				
-				# Check if we're resuming a download.
-				source["totalDownloaded"] = 0
-				self.item['totalDownloaded'] = source["totalDownloaded"]
+					self.downloadPart(part)
+					
+					if not self.okToDownload() or not self.okToUseSource():
+						break
 				
-				fdOpenFlags = "w+"
-				if (os.path.isfile(outputPath)):
-				
-					source["totalDownloaded"] = os.path.getsize(outputPath)
-					self.item['totalDownloaded'] = source["totalDownloaded"]
-					
-					fdOpenFlags = "a+"
-					opener.addheaders = [('Range','bytes=%s-' % source["totalDownloaded"])]
-					
-				fd = None
-				outputObj = None
-				
-				try:
-					stream = opener.open(source["finalUrl"])
-					meta = stream.info()
-					
-					# If we already have a number of bytes downloaded, the returned size will
-					# be the amount remaining and not the total file size. In that case, assume
-					# the previously set size is correct.
-					if (source["totalDownloaded"] == 0):
-						source["size"] = int(meta.getheaders("Content-Length")[0])
-							
-					# Copy these from the source so they remain available for stats purposes after
-					# we've finished dealing with the source.
-					self.item['fileSize'] = source["size"]
-					self.item['totalDownloaded'] = source["totalDownloaded"]
-					
-					# Long winded way to get a file handle since Plex doesn't trust us with open().
-					fd = os.open(outputPath, os.O_RDWR|os.O_CREAT )
-					outputObj = os.fdopen(fd, fdOpenFlags)
-					
-					while True:
-
-						blockStart = Datetime.Now()
-						
-						buffer = stream.read(BufferItem.BLOCK_SIZE)
-						
-						blockDiff = Datetime.Now() - blockStart
-						blockTime = blockDiff.seconds + blockDiff.microseconds / 1000000.0
-						
-						if not buffer:
-							break
-							
-						outputObj.write(buffer)
-						downloaded = len(buffer)
-						
-						self.calculateMetrics(downloaded)
-						
-						#Log("************************ Got some data for: " + self.item['id'])
-						
-						# See if we've received any threading events and process as appropriate.
-						if (not Thread.Wait("CURRENT_SOURCE_OK",0)):
-							Log("************************ Should be changing source...")
-							source['used'] = True
-							self.item['currentStatus'] = "ADDED"
-							self.item['currentSource'] = None
-							Thread.Unblock("CURRENT_SOURCE_OK")
-							break
-						
-						if (not self.okToDownload()):
-							break
-						
-						# Did our block hit its target time. If not, sleep the difference.
-						if (self.blockTargetTime > 0 and self.blockTargetTime > blockTime):
-							Log("************************ Wait Throttling....")
-							Thread.Sleep(self.blockTargetTime - blockTime)
-					
-				except HTTPError, ex:
-					Log("************************ Download Error...")
-					Log(ex)
-					self.item['currentStatus'] = "SOURCE_ERROR"
+				if not self.okToUseSource():
+					self.cleanSource(source)
+					source['status'] = 'USED'
+					self.item['currentStatus'] = 'ADDED'
 					self.item['currentSource'] = None
-					source['used'] = True
-					
-				finally:
 				
-					if (outputObj is not None and not outputObj.closed):
-						outputObj.close()
-						
-					if (stream is not None):
-						stream.close()
-						# Bug in Python means socket don't get closed straight away....
-						Thread.Sleep(2)
-						
-				if (
-					self.item['currentSource'] is not None and
-					self.item['fileSize'] == self.item['totalDownloaded']
-				):
-					self.item['currentSource'] = None
-					self.item['currentStatus'] = "FINISHED"
+				# We've jumped out of the loop that tries to download each part for the current
+				# source. If anything bad happened, the currentSource should have been set to None.
+				if (source['status'] == 'ACTIVE'):
+				
+					# Check each part has succesfully downloaded.
+					allOk = True
+					for part in source['parts']:
+						if (part['size'] != part['downloaded']):
+							allOk = False
+							break
+					allOk = True		
+					if (allOk):
+						Log('*** Finished Download...')
+						source['status'] = 'FINISHED'
+						self.item['currentSource'] = None
+						self.item['currentStatus'] = 'FINISHED'
+					else:
+						self.stop()
 				
 			else:
 			
-				self.item['currentStatus'] = "NO_SOURCE"
-		
-	def okToDownload(self):
+				Log('*** No more sources...')
+				self.item['currentStatus'] = 'NO_SOURCE'
+			
+			# We've just finished dealing with a source (irrespective of how that turned out.)
+			# Save current state back to disk.
+			Dict.Save()
 	
-		if (not Thread.Wait("DOWNLOAD_OK",0)):
-			Log("************************ Stoping download... ")
-			Thread.Unblock("DOWNLOAD_OK")
-			self.item['currentStatus'] = "STOPPED"
-			return False
-		else:
-			return True
 
-	def calculateMetrics(self, downloadedLength):
-	
-		source = self.item['sources'][self.item['currentSource']]
+	'''
+		Pick a source for this download. Try to re-pick the last source that was used if this item
+		is currently stopped. 
 		
-		source['totalDownloaded'] = source['totalDownloaded'] + downloadedLength
-		self.item['totalDownloaded'] = source['totalDownloaded']
-		
-		now =  Datetime.Now()
-		timeDiff = timedelta()
-		if self.lastDownloadTime:
-			timeDiff = now - self.lastDownloadTime
-		self.lastDownloadTime = now
-
-		diff = timeDiff.seconds * 1000000 + timeDiff.microseconds 
-		
-		if diff:
-		
-			self.item['totalDownloadTime'] = self.item['totalDownloadTime'] + float(diff) / 1000000
-			
-			# Average rate of the buffer over the lifetime of the operation.
-			self.item['avgRate'] = source['totalDownloaded'] / float(self.item['totalDownloadTime'])
-						
-			self.curDownloadTime = self.curDownloadTime + diff
-			self.curDownloaded = self.curDownloaded + downloadedLength
-			
-			# Recalculate complete stats every 2 seconds to get a more stable average.
-			if (self.curDownloadTime > 2 * 1000 * 1000):
-			
-				# The current rate averaged over the last 2 seconds.
-				self.item['curRate'] = round(self.curDownloaded / (float(self.curDownloadTime) / 1000000),3)
-				self.curDownloaded = 0
-				self.curDownloadTime = 0
-								
-				# Esitmate time remaining by weighing average speed so far and current speed
-				# inversely to the current percentage complete. So, has a file gets nearer to
-				# completion, more weight will be put on the current download speed whilst at
-				# the start more weight will be put on the average spped so far.
-				self.item['percentComplete'] = source['totalDownloaded'] / float(source['size'])
-				self.item['percentRemaining'] = 1 - self.item['percentComplete']
-				self.item['bytesRemaining'] = source['size'] - source['totalDownloaded']
-								
-				self.item['timeRemainingAvgRate'] = self.item['bytesRemaining'] / self.item['avgRate']
-				self.item['timeRemainingCurRate'] = self.item['bytesRemaining'] / self.item['curRate']
-				
-				# Weight time remaining based on percentComplete.
-				self.item['timeRemaining'] = (
-					(self.item['timeRemainingCurRate'] * self.item['percentRemaining']) +
-					(self.item['timeRemainingAvgRate'] * self.item['percentComplete'])
-				)
-	
-	
+		Source picking is done by looping through the sources and picking the first one which 
+		hasn't already been used or had an error when previously trying to pick it.
+	'''
 	def pickSource(self):
 	
-		Log("CCCCCCCCCCCCCCCCCCCCCCCCCCCCC %s" % self.item['currentStatus'])
-		Log(self.item["currentSource"])
+		Thread.Unblock('CURRENT_SOURCE_OK_%s' % self.id())
+		
+		Log('*** Picking source. Current Status: %s, Current Source: %s' % (self.item['currentStatus'], self.item['currentSource']))
+		
+		source = self.getCurrentSource()
 		
 		if (
 			(
 				self.item['currentStatus'] == 'STOPPED' or
 				self.item['currentStatus'] == 'SUSPENDED'
 			)
-			and self.item["currentSource"] is not None
+			and source
 		):
 		
-			Log("*** Picking buffer source based on previous run")
+			Log('*** Picking buffer source based on previous run')
 			
-			self.item['currentStatus'] = "RESOLVING_SOURCE"
+			self.item['currentStatus'] = 'RESOLVING_SOURCE'
 			
-			source = self.item['sources'][self.item["currentSource"] ]
-			self.getRealSource(source)
+			self.resolveParts(source)
 			
-			if (source["finalUrl"] is not None):
+			if (not self.okToDownload()):
+				return
 			
-				# Get the size of the current item and make sure it's the same.
-				request = urllib2.urlopen(source["finalUrl"])
-				request.get_method = lambda : 'HEAD'
-				meta = request.info()
-				
-				size = int(meta.getheaders("Content-Length")[0])
-				
-				if (source["size"] != size):
-					# Looks like the item is gone? What do we do?
-					Log("*** File Size has changed since item was stopped from %s to %s. Dumping source and starting over." % (source['size'], size))
-					source["size"] = 0
-					source["totalDownloaded"] = 0
-					self.item["currentSource"] = None
+			if (source['status'] == 'READY'):
+			
+				# Get the size of the parts and make sure they're still the same.
+				allOk = True
+				for part in source['parts']:
 					
-				else:
-					Log("Source is still available and the same size. Continuing buffer")
-					return self.item["currentSource"]
+					if (not self.okToDownload()):
+						return
+				
+					request = urllib2.urlopen(part['finalUrl'])
+					request.get_method = lambda : 'HEAD'
+					meta = request.info()
+					
+					size = int(meta.getheaders('Content-Length')[0])
+					
+					if (part['size'] != size):
+						# Looks like the item has changed? Abort.
+						Log('*** File Size has changed since item was stopped from %s to %s. Dumping source and starting over.' % (part['size'], size))
+						allOk = False
+						break
+						
+				# If we get here and allOk is still set, then we're good
+				# to carry on with previous download.
+				if (allOk):
+					Log('Source is still available and the same size. Continuing buffer')
+					return source
 				
 			else:
 			
-				# Looks like the item is gone? What do we do?
-				Log("*** Source that was previously used is no longer available. Dumping source and starting over.")
-				source["size"] = 0
-				source["totalDownloaded"] = 0
-				self.item["currentSource"] = None
+				# Looks like the item is no longer available. Pick another source.
+				Log('*** Source that was previously used is no longer available. Dumping source and starting over.')
+		
+		# Quick check to see if user has asked us to stop....		
+		if (not self.okToDownload()):
+			return
+		
+		Log('XXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
+		Log(source)
+		
+		# We're either re-picking a source or starting for first time.
+		# Either way, clean up object state and any previous download 
+		# files we may have left lying around.
+		if source:
+			Log('*** Cleaning source and dumping it.')
+			self.cleanSource(source)
+			source = None
+			
+		self.item['currentStatus'] = 'RESOLVING_SOURCE'
+		
+		for source in self.item['sources']:
+		
+			# This can be a bit slooow. 
+			# Check to see if user has asked for us to stop.
+			if (not self.okToDownload()):
+				return
+			
+			if source['status'] == 'NEW':
+			
+				self.resolveParts(source)
 				
+				if (not self.okToDownload()):
+					return
+				
+				if source['status'] == 'READY':
+				
+					self.sizeParts(source)
+				
+					if (not self.okToDownload()):
+						return
+				
+					self.item['currentSource'] = source['id']
+
+					Log('*** Picked source: %s' % self.getCurrentSource())
+					Log('*** Current Source State: %s' % self.item['sources'])
 		
-		self.cleanData()
-		self.item['currentStatus'] = "RESOLVING_SOURCE"
+					Dict.Save()
 		
-		source = None		
-		for sourceKey in self.item['sources']:
-		
-			source = self.item['sources'][sourceKey]
-			if (not 'used' in source):
-				self.getRealSource(source)
-				if (source["finalUrl"] is not None):
-					self.item["currentSource"] = sourceKey
-					break
-		
-		Log("Picked source: %s" % source)
-		Log(self.item['sources'])
-		return source
-		
-	def getRealSource(self, item):
+					return source
+	
+	
+	'''
+		Each part will have been given a provider URL. Need to resolve those to a real video
+		URL. Do that by using Plex's URL Services.
+	'''
+	def resolveParts(self, source):
 				
 		# Not all sources will sucessfully return a finalURL...
 		try:
-		
-			mediaObjects = URLService.MediaObjectsForURL(item["url"])
-			partUrl = mediaObjects[0].parts[0].key
+					
+			for part in source['parts']:
+			
+				if (not self.okToDownload()):
+					return
+
+				mediaObjects = URLService.MediaObjectsForURL(part['unresolvedUrl'])
+				partUrl = mediaObjects[0].parts[0].key
 	
-			# Manually resolve any indirect URLs..
-			if mediaObjects[0].parts[0].key.find("indirect=1") >= 0:
+				# Manually resolve any indirect URLs..
+				if mediaObjects[0].parts[0].key.find('indirect=1') >= 0:
 
-				# Get final url. Note the addition of the client platform...
-				# That's so the Putlocker / Sockshare provider can do its magic.
-				request = urllib2.Request(
-					BufferItem.PLEX_URL + partUrl,
-					None, 
-					{ 'X-Plex-Client-Platform':Client.Platform }
-				)
-				response = urllib2.urlopen(request).read()
+					# Get final url. Note the addition of the client platform...
+					# That's so the Putlocker / Sockshare provider can do its magic.
+					request = urllib2.Request(
+						BufferItem.PLEX_URL + partUrl,
+						None, 
+						{ 'X-Plex-Client-Platform':Client.Platform }
+					)
+					response = urllib2.urlopen(request).read()
 
-				responseObj = XML.ElementFromString(response)		
-				partUrl = responseObj.xpath("//Part/@key")[0]
+					responseObj = XML.ElementFromString(response)		
+					partUrl = responseObj.xpath('//Part/@key')[0]
 				
-			item["finalUrl"] = str(partUrl)
+				part['finalUrl'] = str(partUrl)
+				
+			source['status'] = 'READY'
 						
 		except Exception, ex:
-			Log("*******************************")
-			Log(str(ex))
-			item["finalUrl"] = None
-			item["size"] = 0
-				
-	def addSource(self, sources):
-	
-		for source in sources:
-			source['size'] = 0
-			source['finalUrl'] = None
-			self.item['sources'][source['url']] = source
 		
+			Log.Exception("*** Error whilst resolving part's final URL.")
+			source['status'] = 'ERROR'
+				
+		
+	'''
+		Try to set up the size of each part. Can't do this when starting download of part as stats
+		rely on knowing size of all parts beforehand.
+	'''
+	def sizeParts(self, source):
+	
+		for part in source['parts']:
+		
+			if (not self.okToDownload()):
+				return
+				
+			try:
+				request = urllib2.urlopen(part['finalUrl'])
+				request.get_method = lambda : 'HEAD'
+				meta = request.info()
+					
+				part['size'] = int(meta.getheaders('Content-Length')[0])
+				Log("*** Set part size to %s" % part['size'])
+				
+			except Exception, ex:
+				Log.Exception("*** Error encountered whilst trying to set part's size")
+				part['size'] = -1
+			
+				
+	'''
+		Prepare to download a part.
+	'''
+	def downloadPart(self, part):
+		
+		Log('*** Starting download of part %s', part)
+
+		startByte = 0
+		
+		# Create a file for this part.
+		if part['file'] is None:
+			part['file'] = os.path.join(self.item['outputDir'], str(uuid.uuid4()))
+			Log('*** Set file loc to %s' % part['file'])
+			
+		if os.path.isfile(part['file']):
+	
+			Log('*** Part file already exists. Checking if part complete.')
+	
+			# If the source size equals the file size, then this part is finished.
+			# Move onto next part (if any)
+			if os.path.getsize(part['file']) == part['size']:
+				Log('*** Part downloaded size == to expected size. Skipping to next part')
+				return
+			else:
+				Log('*** Part is partial download. Trying to resume...')
+				part['downloaded'] = os.path.getsize(part['file'])
+				startByte = part['downloaded']
+			
+		else:
+			part['downloaded'] = 0
+				
+		# Save current state before trying risk operation of opening site...
+		Dict.Save()
+				
+		# Make the current part easily accessible.
+		# Note that we don't use an entry in the items Dict here like we do for 
+		# currentSource as we don't need to preserve this across restarts unlike
+		# the currentSource...		
+		self.currentPart = part
+	
+		try:
+			self.downloadURL(part['finalUrl'], part['file'], startByte)
+			Log('*** Finished / Stopped downloading of part: %s' % part)
+			
+		except HTTPError, ex:
+		
+			Log.Exception('*** Download Error...')
+			source['status'] = 'ERROR'
+			self.item['currentStatus'] = 'SOURCE_ERROR'
+			self.item['currentSource'] = None
+			
+		finally:
+		
+			self.currentPart = None
+
+		
+	'''
+		Download a URL to a file. Most basic operation here.
+	'''
+	def downloadURL(self, url, outFile, startByte):
+		
+		if not self.okToDownload():
+			return
+		
+		Log("*** Starting download of %s to %s" % (url, outFile))
+		
+		# Opener for the file.
+		opener = urllib2.build_opener()
+	
+		fdOpenFlags = 'w+'
+
+		if startByte > 0:
+			opener.addheaders = [('Range','bytes=%s-' % startByte)]
+			fdOpenFlags = 'a+'
+		
+		stream = opener.open(url)
+		meta = stream.info()
+		
+		# Long winded way to get a file handle since Plex doesn't trust us with open().
+		fd = os.open(outFile, os.O_RDWR|os.O_CREAT )
+		outputObj = os.fdopen(fd, fdOpenFlags)
+	
+		while True and self.currentPart['downloaded'] < 5 * 1024 * 1024:
+		
+			if (not self.okToDownload() or not self.okToUseSource()):
+				break
+				
+			# Let bufferManager know there's an active download and that it should be trying
+			# to keep the plugin alive.
+			Thread.Block(BufferManager.DOWNLOAD_ACTIVE_KEY)
+
+			blockStart = Datetime.Now()
+		
+			buffer = stream.read(BufferItem.BLOCK_SIZE)
+		
+			blockDiff = Datetime.Now() - blockStart
+			blockTime = blockDiff.seconds + blockDiff.microseconds / 1000000.0
+		
+			if not buffer:
+				break
+			
+			outputObj.write(buffer)
+			downloaded = len(buffer)
+		
+			self.updateStats(downloaded)
+		
+			#Log('*** Got some data for source: %s' % source['id'])
+		
+			# Did our block hit its target time. If not, sleep the difference.
+			if (self.blockTargetTime > 0 and self.blockTargetTime > blockTime):
+				Log('*** Wait Throttling for %s....' % (self.blockTargetTime - blockTime))
+				Thread.Sleep(self.blockTargetTime - blockTime)
+
+		
+		if (outputObj is not None and not outputObj.closed):
+			outputObj.close()
+			
+		if (stream is not None):
+			stream.close()
+			# Bug in Python means socket don't get closed straight away....
+			Thread.Sleep(2)
+			
+		Log('*** Finished / Stopped downloading of url: %s' % url)
+
+	
+	'''
+		Are we still OK to download or should we stop as soon as possible?
+	'''
+	def okToDownload(self):
+	
+		#Log("*** Waiting on signal: DOWNLOAD_OK_%s" % self.id())
+		if (not Thread.Wait('DOWNLOAD_OK_%s' % self.id(), 0)):
+			Log('****** Received thread signal to stop download... ')
+			self.item['currentStatus'] = 'STOPPED'
+			return False
+		else:
+			return True
+			
+	'''
+		Are we still OK with current source or do we need to switch?
+	'''
+	def okToUseSource(self):
+	
+		if (not Thread.Wait('CURRENT_SOURCE_OK_%s' % self.id(), 0)):
+			Log('****** Received thread signal to change source...')
+			return False
+		else:
+			return True
+		
+		
+	'''
+		Update some key stats for the download.
+	'''
+	def updateStats(self, bytesReceivedCount):
+	
+		now =  Datetime.Now()
+		timeDiff = timedelta()
+		if self.lastDownloadTime:
+			timeDiff = now - self.lastDownloadTime
+		self.lastDownloadTime = now
+		
+		diff = timeDiff.seconds * 1000000 + timeDiff.microseconds
+		
+		# Keep track of time it took to download last 10 chunks.
+		while len(self.curDownloadStats) >= 100:
+			self.curDownloadStats.pop(0)
+				
+		self.curDownloadStats.append({'size': bytesReceivedCount, 'time': float(diff) / 1000000  })
+		
+		self.currentPart['downloaded'] = self.currentPart['downloaded'] +  bytesReceivedCount
+		self.currentPart['downloadTime'] = self.currentPart['downloadTime'] + float(diff) / 1000000
+
+	
+	'''
+		Generate some stats for the current item.
+	'''
+	def stats(self):
+	
+		# Calculate download stats....
+		source = self.getCurrentSource()
+		
+		stats = {
+			'totalDownloadSize': -1,
+			'totalDownloaded': -1,
+			'totalDownloadTime': -1,
+			'avgRate': -1,
+			'percentComplete': -1,
+			'percentRemaining': -1,
+			'bytesRemaining': -1,
+			'timeRemainingAvgRate': -1,
+			'timeRemainingCurRate': -1,
+			'timeRemaining': -1,
+			'avgRate': -1,
+			'curRate': -1,
+			'partCount': -1,
+			'partCurrent': -1,
+		}
+		
+		stats['status'] = self.item['currentStatus']
+		
+		if (source is not None):
+		
+			stats['provider'] = source['provider']
+
+			# Total file size to download and how many bytes downloaded so far. 
+			# Annoyingly, Plex dosen't expose sum()		
+			for part in source['parts']:
+				if 'size' in part:
+					stats['totalDownloadSize'] = stats['totalDownloadSize'] + part['size'] 
+				if 'downloaded' in part:
+					stats['totalDownloaded'] = stats['totalDownloaded'] + part['downloaded']
+				if 'downloadTime' in part:
+					stats['totalDownloadTime'] = stats['totalDownloadTime'] + part['downloadTime']	
+			
+			stats['partCount'] = len(source['parts'])
+			
+			if (self.currentPart):
+				stats['partCurrent'] = source['parts'].index(self.currentPart) + 1
+			
+			# Average rate of the buffer over the lifetime of the operation.
+			if stats['totalDownloadTime'] > 0:
+				stats['avgRate'] = stats['totalDownloaded'] / float(stats['totalDownloadTime'])
+			
+			# The current rate averaged over the last 2 seconds.
+			curBytes = 0
+			curTime = 0
+			for item in self.curDownloadStats:
+				curBytes = curBytes + item['size']
+				curTime = curTime +item['time']
+			
+			if (curTime > 0):
+				stats['curRate'] = curBytes / float(curTime)
+			
+			# Don't care about errors here.
+			try:
+			
+				if (stats['totalDownloadSize'] > 0 and stats['totalDownloaded'] > 0):
+				
+					# Esitmate time remaining by weighing average speed so far and current speed
+					# inversely to the current percentage complete. So, has a file gets nearer to
+					# completion, more weight will be put on the current download speed whilst at
+					# the start more weight will be put on the average spped so far.
+					stats['percentComplete'] = stats['totalDownloaded'] / float(stats['totalDownloadSize'])
+					stats['percentRemaining'] = 1 - stats['percentComplete']
+					stats['bytesRemaining'] = stats['totalDownloadSize'] - stats['totalDownloaded']
+					
+					stats['timeRemainingAvgRate'] = stats['bytesRemaining'] / stats['avgRate']
+					stats['timeRemainingCurRate'] = stats['bytesRemaining'] / stats['curRate']
+				
+					# Weight time remaining based on percentComplete.
+					stats['timeRemaining'] = (
+						(stats['timeRemainingCurRate'] * stats['percentComplete']) +
+						(stats['timeRemainingAvgRate'] * stats['percentRemaining'])
+					)
+			
+			except Exception, ex:
+				Log.Exception('*** Error whilst calculating stats.')
+				pass
+		
+		return stats
+	
+
+	'''
+		Helper method to return the Dict for the current source.
+	'''
+	def getCurrentSource(self):
+	
+		# We don't have a current source. Abort.
+		if (not self.item['currentSource']):
+			return None
+			
+		# Return first source with the same id as currentSource.
+		for source in self.item['sources']:
+			if (source['id'] == self.item['currentSource']):
+				return source
+		
+		# No match found. Abort.
+		return None
+
+
+	'''
+		Reset a source to be like new.
+	'''
+	def cleanSource(self, source):
+	
+		source['status'] = 'NEW'
+		
+		for part in source['parts']:
+		
+			part['size'] = -1
+			
+			if part['file'] and os.path.isfile(part['file']):
+				# Delete the part's output file.
+				os.remove(part['file'])
+				
+			part['file'] = None
+			part['downloaded'] = -1
+			part['downloadTime'] = -1
+		
+	
+	'''
+		Remove any files we've created.
+	'''
 	def cleanData(self):
 	
-		self.item['fileSize'] = 0
-		self.item['totalDownloaded'] = 0
-		self.item['totalDownloadTime'] = 0
+		if (self.item['outputDir']):
+			shutil.rmtree(self.item['outputDir'])
 		
-		if self.item['outputFile'] is not None and os.path.isfile(self.item['outputFile']):
-			os.remove(self.item['outputFile'])
-	
+		
+	'''
+		Reset ourselves so that we get picked up by the main BufferManager thread.
+	'''
 	def makeStartable(self):
 	
 		# All sources have been tried unsuccesfully previously. Try them again.
 		if self.item['currentStatus'] == 'NO_SOURCE':
 		
-			for sourceKey in self.item['sources']:
-				if ('used' in self.item['sources'][sourceKey]):
-					del self.item['sources'][sourceKey]['used']
+			for source in self.item['sources']:
+				self.cleanSource(source)
 					
 			self.item['currentStatus'] = 'ADDED'
 			
@@ -718,7 +1187,9 @@ class BufferItem(object):
 			self.item['currentStatus'] = 'SUSPENDED'
 		
 	
-	# Return whether this current BufferItem can currently start its download.
+	'''
+		Helper method to return whether this current BufferItem can currently start its download.
+	'''
 	def isStartable(self):
 	
 		currentStatus = self.item['currentStatus']
@@ -750,6 +1221,10 @@ class BufferItem(object):
 			currentStatus == 'RESOLVING_SOURCE'
 			or currentStatus == 'ACTIVE'
 		)
+		
+	def stop(self):
+	
+		self.item['currentStatus'] = 'STOPPED'
 		
 	def isStopped(self):
 	

@@ -71,6 +71,7 @@ USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.
 
 PLEX_URL = "http://127.0.0.1:32400"
 PLUGIN_URL = PLEX_URL + VIDEO_PREFIX
+KEEP_ALIVE_PATH = VIDEO_PREFIX + "/keepalive"
 
 ####################################################################################################
 
@@ -146,7 +147,9 @@ def Start():
 	Thread.Create(CheckAdditionalSources, sources=Site.ADDITIONAL_SOURCES)
 	
 	# Initialise Buffer manager and re-launch any suspended downloads...
-	BufferManager.instance().launch(Site.GetBufferPath())
+	buffer = BufferManager.instance()
+	buffer.setPrefs(Site.GetBufferPath(), PLEX_URL + KEEP_ALIVE_PATH)
+	buffer.launch()
 
 
 ####################################################################################################
@@ -1611,12 +1614,21 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 	
 		if (buffer.isReady(url)):
 
-			oc.add(
-				MovieObject(
-					url="prebuffer://" + buffer.fileLoc(url),
-					title="Play Pre-Bufferred Item"
+			part_count = buffer.partCount(url)
+			
+			for cnt in range(0, part_count):
+			
+				title = "Play Pre-Bufferred Item"
+				
+				if (part_count > 1):
+					title = "Play Pre-Bufferred Part %s of %s" % (cnt + 1, part_count)
+					
+				oc.add(
+					MovieObject(
+						url="prebuffer://" + buffer.fileLoc(url, cnt),
+						title=title
+					)
 				)
-			)
 
 			oc.add(
 				DirectoryObject(
@@ -1651,7 +1663,7 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 			oc.add(
 				DirectoryObject(
 					key=Callback(BufferNextSourceMenu, url=url),
-					title="Try another source",
+					title="Try Another Source",
 				)
 			)
 
@@ -1669,6 +1681,36 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 				)
 			)
 			
+		elif buffer.isQueued(url):
+		
+			if (caller != "stats"):
+				stats = BufferManager.instance().stats(url)
+				title = "View Stats "
+				if (stats["fileSize"] == "-"):
+					title = title + "(%s)" % stats['status']
+				else:
+					title = title + ("(%s@%s)" % (stats["timeRemainingShort"], stats["curRate"]))
+				oc.add(
+					DirectoryObject(
+						key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url),
+						title=title,
+					)
+				)
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferStopMenu, url=url),
+					title="Stop",
+				)
+			)
+			
+			oc.add(
+				DirectoryObject(
+					key=Callback(BufferStopAndDelMenu, url=url),
+					title="Stop and Delete",
+				)
+			)
+		
 		else:
 		
 			if (caller != "stats"):
@@ -1769,30 +1811,46 @@ def BufferStartMenu(url, mediainfo, path):
 
 	oc = ObjectContainer()
 	buffer = BufferManager.instance()
-	providerURLs = []
+	providers = []
 	
-	# Get a list of media items for each available source.
+	# Loop through each source...
 	for source_item in Parsing.GetSources(url):
 	
-		mediaitem = GetItemForSource(mediainfo=mediainfo, source_item=source_item, parent_name="")
+		items = []
 		
-		if (
-			mediaitem is not None
-			and 'item' in mediaitem 
-			and 'url' in mediaitem 
-			and isinstance(mediaitem['item'],VideoClipObject)
-			and mediaitem['url'] is not None
-		):
-			providerURLs.append({'url': mediaitem['url'], 'provider': source_item['provider_name'] })
+		# Get the media items for the current source.
+		item =  Parsing.GetItemForSource(mediainfo, source_item, None)
+		items.append(item)
+		
+		if item and isinstance(item, MultiplePartObject):
+		
+			Log("*** Found multi-part object with %s parts." % item.part_count)
+			# Retrieve the media item for each part.
+			for cnt in range(0, item.part_count):
+				items.append(Parsing.GetItemForSource(mediainfo, source_item, cnt))
+		
+		# Grab valid URLs out of all the media items we've seen for this source.
+		itemUrls = []
+		
+		# Process all the media items we got and look for VideoItems to add to the list of
+		# parts for this source.
+		for item in items:
+			if item and isinstance(item, VideoClipObject):
+				itemUrls.append(item.url)
+		
+		if len(itemUrls) > 1:
+			providers.append(
+				{ 'provider': source_item['provider_name'], 'parts': itemUrls }
+			)	
 
-	if (len(providerURLs) > 0):
+	if (len(providers) > 0):
 	
 		buffer.create(url, adtlInfo={'mediainfo': mediainfo, 'path': path})
-		buffer.addSource(url, providerURLs)
-		buffer.launch(Site.GetBufferPath())
+		buffer.addSources(url, providers)
+		buffer.launch()
 		
 		oc.header = "Pre-Buffering Launched"
-		oc.message = "Pre-Buffering for this items has started with %s possible sources." % str(len(providerURLs))
+		oc.message = "Pre-Buffering for this items has started with %s possible sources." % str(len(providers))
 		
 	else:
 	
@@ -1808,7 +1866,7 @@ def BufferResumeMenu(url):
 
 	oc = ObjectContainer()
 	
-	BufferManager.instance().resume(url, Site.GetBufferPath())
+	BufferManager.instance().resume(url)
 	oc.header = "Pre-Buffering resumed for this item."
 	oc.message = "Item has been added to end of pre-buffering queue."
 	
@@ -1871,11 +1929,11 @@ def BufferNextSourceMenu(url):
 	oc = ObjectContainer()
 	
 	if (BufferManager.instance().nextSource(url)):
-		oc.header = "Pre-Buffering source switched to new source."
+		oc.header = "Switching to new pre-buffering source."
 		oc.message = ""
 	else:
 		oc.header = "Source Switch Failed"
-		oc.message = "Download thread failed to pickup source switch event. Try stopping and starting download."
+		oc.message = "Thread failed to pickup source switch event within allocated time.\nYou may need to wait a little while for thread to pickup signal."
 		
 	return oc
 	
@@ -1908,10 +1966,14 @@ def BufferStatsMenu(mediainfo, parent_name, url, replace_parent=False):
 		)
 	)
 			
+	title = "Source Name: %s" % stats['provider']
+	if stats['partCount'] > 1:
+		title = title + " - %s part(s)" % stats['partCount']
+		
 	oc.add(
 		DirectoryObject(
 			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
-			title="Source Name: %s" % stats['provider'],
+			title=title,
 			summary=mediainfo.summary,
 			art=mediainfo.background,
 			thumb= mediainfo.poster,
@@ -1929,7 +1991,7 @@ def BufferStatsMenu(mediainfo, parent_name, url, replace_parent=False):
 
 		)
 	)
-
+	
 	oc.add(
 		DirectoryObject(
 			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
@@ -2913,7 +2975,8 @@ def GetItemForSource(mediainfo, source_item, parent_name, part_index=None):
 		
 	# The only way we can get down here is if the provider wasn't supported or
 	# the provider was supported but not visible. Maybe user still wants to see them?
-	if (Prefs['show_unsupported']):
+	elif (Prefs['show_unsupported']):
+	
 		return {
 			'item': 
 				DirectoryObject(
@@ -3245,6 +3308,17 @@ def CheckAdditionalSources(sources):
 			Log.Exception("Error working out what additional sources are available.")
 			pass
 
+
+####################################################################################################
+#
+@route(KEEP_ALIVE_PATH)
+def KeepAlive():
+
+	# A simple method which can be called to make sure the plugin stays within Plex's inactivity 
+	# timeout period and doesn't get killed. Especially useful for long running threads....
+	Log(KEEP_ALIVE_PATH)
+	
+	return "ALIVE"
 	
 ###############################################################################
 # UTIL METHODS

@@ -46,14 +46,20 @@ def PlayVideo(url):
 	# space, which won't be the case for us due to where we save the buffered items.
 	
 	# Create a tmp folder.
-	tempPath = tempfile.mkdtemp()
-	tempFile = tempPath + "/play.m4v"
+	#tempPath = tempfile.mkdtemp()
+	#tempFile = tempPath + "/play.m4v"
+	#
+	#Log(tempPath)
+	#Log(filePath)
 	
-	Log(tempPath)
-	Log(filePath)
+	tempPath =  os.path.dirname(filePath)
+
+	# The fake extension is so that Plex's File scanner picks up our file.
+	tempFile = filePath + ".m4v" 
 	
 	# Create a symlink back to the file.
-	os.link(filePath, tempFile)
+	if not os.path.isfile(tempFile):
+		os.link(filePath, tempFile)
 	
 	# Create a library for the tmp folder above.
 	#
@@ -66,8 +72,8 @@ def PlayVideo(url):
 		"&agent=com.plexapp.agents.none" +
 		"&scanner=Plex+Video+Files+Scanner" +
 		"&language=xn" +
-		"&location=" + urllib.quote_plus(tempPath)
-		+"&name=PreBuffer+Play+-+XXXX2",
+		"&location=" + urllib.quote_plus(tempPath) +
+		"&name=PreBuffer+Play",
 	)
 	
 	response = opener.open(request,"")
@@ -90,10 +96,10 @@ def PlayVideo(url):
 		response = opener.open(request)
 	
 	
-		# Look for the one and only media item in there.
+		# Look for the one and only media item in there with our name.
 		content = response.read()
 		elem = XML.ElementFromString(content)
-		partElems = elem.xpath("//Part")
+		partElems = elem.xpath("//Part[@file='%s']" % tempFile)
 	
 		if (len(partElems) > 0):
 			fileURL = partElems[0].get("key")
@@ -127,9 +133,7 @@ class CleanupAgent(Thread):
 
 	def __init__(self, libURL):
 		Thread.__init__(self)
-		Log('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
 		self.libURL = libURL
-		Log('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX22222')
 		
 	def run(self):
 	
