@@ -27,9 +27,9 @@ AZ_ICON='icon-az.png'
 ADDITIONAL_SOURCES = ['lmwt']
 
 DATA_PATHS = { 
-		'MacOSX': "/Library/Application Support/Plex Media Server/Plug-in Support/Data/com.plexapp.plugins.icefilms/BufferItems",
-		'Windows': "",
-		'Linux': "",
+		'MacOSX': "~/Library/Application Support/Plex Media Server/Plug-in Support/Data/com.plexapp.plugins.icefilms/BufferItems",
+		'Windows': "~\Local Settings\Application Data\Plex Media Server\Plug-in Support\Data\com.plexapp.plugins.icefilms\BufferItems",
+		'Linux': "/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Plug-in Support/Data/com.plexapp.plugins.icefilms/BufferItems",
 	}
 
 # When a provider uses CAPTCHAs, the back and forth needed to get the user to solve the CAPTCHA
@@ -44,11 +44,15 @@ def GetCaptchaPlayURL():
 # Path in which to save pre-buffered items.
 def GetBufferPath():
 
-	dir = (os.getenv('USERPROFILE') or os.getenv('HOME')) + DATA_PATHS[Platform.OS]
+	path = DATA_PATHS[Platform.OS]
+	
+	if path.startswith("~"):
+		dir = os.path.join(os.getenv('USERPROFILE') or os.getenv('HOME'), path[2:])
 	
 	# Check the directory exists.
 	if (not os.path.exists(dir)):
 		# If not, create it.
+		Log("*** Trying to create pre-buffering folder (%s)" % dir)
 		os.makedirs(dir)	
 		
 	return dir
