@@ -644,7 +644,8 @@ class BufferItem(object):
 				# Loop through each part in the source.
 				for part in source['parts']:
 				
-					self.downloadPart(part)
+					if (not self.downloadPart(part)):
+						break
 					
 					if not self.okToDownload() or not self.okToUseSource():
 						break
@@ -657,7 +658,41 @@ class BufferItem(object):
 				
 				# We've jumped out of the loop that tries to download each part for the current
 				# source. If anything bad happened, the currentSource should have been set to None.
-				if (source['status'] == 'ACTIVE'):
+				if (source['status'] == 'ACTIVE_ERROR'):
+				
+					# Download of part had succesfully started before encountering error.
+					# Retry source.
+					Log('*** Download of source %s encountered error whilst actively downloading.' % source)
+					source['status'] = 'ACTIVE'
+							
+					localProblem = True
+					cnt = 1
+					
+					# Check if the problem is local connectivity...
+					while localProblem and cnt <= 20:
+						cnt = cnt + 1
+						try:
+							response = urllib2.urlopen('http://www.google.com')
+							localProblem = False
+						except urllib2.URLError, ex:
+							Log("*** Local connectivity broken. Sleeping for 30 secs till next check.")
+							Thread.Block(BufferManager.DOWNLOAD_ACTIVE_KEY)
+							Thread.Sleep(30)
+							
+					if (localProblem):
+						# We waited for local connectivity to come back for the last 10 mins.
+						# It still hasn't. Time to give up. Stop op.
+						Log("*** Stopping download as local connectivity seems to be broken.")
+						self.stop()
+					else:
+						# Problem may have been local connectivity issue which is now resolved
+						# or a source problem. So, try again with the same source. If the problem
+						# was local connectivity, we'll resume. If problem was with source, we'll
+						# get a new source.
+						Log("*** Local connectivity ok. Retrying source.")
+						self.item['currentStatus'] = 'SUSPENDED'					
+					
+				elif (source['status'] == 'ACTIVE'):
 				
 					# Check each part has succesfully downloaded.
 					allOk = True
@@ -904,15 +939,27 @@ class BufferItem(object):
 			Log('*** Finished / Stopped downloading of part: %s' % part)
 			
 		except HTTPError, ex:
-		
+			
+			# Something went wrong trying to open URL....
 			Log.Exception('*** Download Error...')
-			source['status'] = 'ERROR'
+			self.getCurrentSource()['status'] = 'ERROR'
 			self.item['currentStatus'] = 'SOURCE_ERROR'
 			self.item['currentSource'] = None
+			return False
+			
+		except socket.timeout, ex:
+		
+			# Something went wrong whilst downloading...
+			Log.Exception('*** Download Error...')
+			self.getCurrentSource()['status'] = 'ACTIVE_ERROR'
+			self.item['currentStatus'] = 'SOURCE_ERROR'
+			return False
 			
 		finally:
 		
 			self.currentPart = None
+			
+		return True
 
 		
 	'''
@@ -946,45 +993,48 @@ class BufferItem(object):
 		fd = os.open(outFile, fdFlags)
 		outputObj = os.fdopen(fd, fdOpenFlags)
 	
-		while True:
+		try:
 		
-			if (not self.okToDownload() or not self.okToUseSource()):
-				break
+			while True:
+			
+				if (not self.okToDownload() or not self.okToUseSource()):
+					break
 				
-			# Let bufferManager know there's an active download and that it should be trying
-			# to keep the plugin alive.
-			Thread.Block(BufferManager.DOWNLOAD_ACTIVE_KEY)
-
-			blockStart = Datetime.Now()
-		
-			buffer = stream.read(BufferItem.BLOCK_SIZE)
-		
-			blockDiff = Datetime.Now() - blockStart
-			blockTime = blockDiff.seconds + blockDiff.microseconds / 1000000.0
-		
-			if not buffer:
-				break
+				# Let bufferManager know there's an active download and that it should be trying
+				# to keep the plugin alive.
+				Thread.Block(BufferManager.DOWNLOAD_ACTIVE_KEY)
+				
+				blockStart = Datetime.Now()
+				
+				buffer = stream.read(BufferItem.BLOCK_SIZE)
+				
+				blockDiff = Datetime.Now() - blockStart
+				blockTime = blockDiff.seconds + blockDiff.microseconds / 1000000.0
+				
+				if not buffer:
+					break
+				
+				outputObj.write(buffer)
+				downloaded = len(buffer)
+				
+				self.updateStats(downloaded)
+				
+				#Log('*** Got some data for source: %s' % source['id'])
 			
-			outputObj.write(buffer)
-			downloaded = len(buffer)
+				# Did our block hit its target time. If not, sleep the difference.
+				if (self.blockTargetTime > 0 and self.blockTargetTime > blockTime):
+					Log('*** Wait Throttling for %s....' % (self.blockTargetTime - blockTime))
+					Thread.Sleep(self.blockTargetTime - blockTime)
+	
+		finally:
 		
-			self.updateStats(downloaded)
-		
-			#Log('*** Got some data for source: %s' % source['id'])
-		
-			# Did our block hit its target time. If not, sleep the difference.
-			if (self.blockTargetTime > 0 and self.blockTargetTime > blockTime):
-				Log('*** Wait Throttling for %s....' % (self.blockTargetTime - blockTime))
-				Thread.Sleep(self.blockTargetTime - blockTime)
-
-		
-		if (outputObj is not None and not outputObj.closed):
-			outputObj.close()
-			
-		if (stream is not None):
-			stream.close()
-			# Bug in Python means socket don't get closed straight away....
-			Thread.Sleep(2)
+			if (outputObj is not None and not outputObj.closed):
+				outputObj.close()
+				
+			if (stream is not None):
+				stream.close()
+				# Bug in Python means socket don't get closed straight away....
+				Thread.Sleep(2)
 			
 		Log('*** Finished / Stopped downloading of url: %s' % url)
 
