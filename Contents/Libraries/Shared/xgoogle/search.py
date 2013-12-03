@@ -256,7 +256,7 @@ class GoogleSearch(object):
         return title, url
 
     def _extract_description(self, result):
-        desc_div = result.find('div', {'class': re.compile(r'\bs\b')})
+        desc_div = result.find('span', {'class': re.compile(r'\bst\b')})
         if not desc_div:
             self._maybe_raise(ParseError, "Description tag in Google search result was not found", result)
             return None
