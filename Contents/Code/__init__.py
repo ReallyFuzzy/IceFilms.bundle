@@ -22,6 +22,7 @@ import demjson
 import Notifier
 import Site
 import Utils
+import Buffer
 
 from NavExObject    import CaptchaBase, MultiplePartObject
 from MetaProviders  import DBProvider, MediaInfo
@@ -805,6 +806,9 @@ def TVSeasonMenu(mediainfo=None, season_url=None,item_name=None, path=[], parent
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
 	
+	# We may have gotten here after client stopped playing a pre-buffered item. Clean up time...
+	BufferPlayClean()
+	
 	# Clean up media info that's been passed in from favourites / recently watched.
 	mediainfo.ep_num = None
 	
@@ -1026,6 +1030,11 @@ def SourcesOrBufferMenu(mediainfo=None, url=None, item_name=None, path=[], paren
 	
 		title = "Play Pre-Bufferred Item"
 		
+		# Store the fact that this client maybe ready to play this video.
+		# This will be used to cleanup the libraries we use.
+		DictDefault("BUFFER_CLIENT_PLAY", {})[Request.Headers['X-Plex-Client-Identifier']] = buffer.fileLoc(url, 0)
+		Dict.Save()
+		
 		if (part_count > 1):
 			title = "Play Pre-Bufferred Part %s of %s" % (cnt + 1, part_count)
 			
@@ -1057,6 +1066,9 @@ def SourcesOrBufferMenu(mediainfo=None, url=None, item_name=None, path=[], paren
 def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=None, external_caller=None, replace_parent=False):
 	
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
+	
+	# We may have gotten here after client stopped playing a pre-buffered item. Clean up time...
+	BufferPlayClean()
 	
 	if (item_name is None):
 		item_name = mediainfo.title
@@ -1528,7 +1540,10 @@ def SearchResultsMenu(query, type, parent_name=None):
 def BufferMenu(parent_name=None, replace_parent=False):
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
-
+	
+	# We may have gotten here after client stopped playing a pre-buffered item. Clean up time...
+	BufferPlayClean()
+	
 	oc = ObjectContainer(no_cache=True, view_group="InfoList", title1=parent_name, title2=L("BufferTitle"), replace_parent=replace_parent)
 	
 	buffer = BufferManager.instance()
@@ -1625,6 +1640,11 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 		if (buffer.isReady(url)):
 
 			part_count = buffer.partCount(url)
+
+			# Store the fact that this client maybe ready to play this video.
+			# This will be used to cleanup the libraries we use.
+			DictDefault("BUFFER_CLIENT_PLAY",{})[Request.Headers['X-Plex-Client-Identifier']] = buffer.fileLoc(url, 0)
+			Dict.Save()
 			
 			for cnt in range(0, part_count):
 			
@@ -1956,6 +1976,9 @@ def BufferStatsMenu(mediainfo, parent_name, url, replace_parent=False):
 	buffer = BufferManager.instance()
 	stats = buffer.stats(url)
 	
+	# We may have gotten here after client stopped playing a pre-buffered item. Clean up time...
+	BufferPlayClean()
+	
 	oc.add(
 		DirectoryObject(
 			key=Callback(BufferStatsMenu, mediainfo=mediainfo, parent_name=parent_name, url=url, replace_parent=True),
@@ -2049,6 +2072,24 @@ def BufferStatsMenu(mediainfo, parent_name, url, replace_parent=False):
 	
 	return oc
 
+####################################################################################################
+
+def BufferPlayClean():
+
+	clients = DictDefault("BUFFER_CLIENT_PLAY", {})
+	Log("*** Current clients play list: %s" % clients)
+	
+	if (Request.Headers['X-Plex-Client-Identifier'] in clients):
+	
+		path = clients[Request.Headers['X-Plex-Client-Identifier']]
+		Log("*** Should be trying to remove %s from Pre-Play library" % path)
+		del clients[Request.Headers['X-Plex-Client-Identifier']]
+		
+		# Remove path from library.
+		# FIXME: Need to check no-one else is also playing this item.
+		BufferDelPathFromLib(String.Encode(path))
+
+		
 ####################################################################################################
 # HISTORY MENU
 ####################################################################################################
@@ -3329,11 +3370,33 @@ def KeepAlive():
 	Log(KEEP_ALIVE_PATH)
 	
 	return "ALIVE"
+
+####################################################################################################
 	
+@route(VIDEO_PREFIX + "/prebuffer/addPathToLib/{path}")
+def BufferAddPathToLib(path):
+
+	return Buffer.addPathToLib(String.Decode(path))
+	
+####################################################################################################
+
+@route(VIDEO_PREFIX + "/prebuffer/delPathFromLib/{path}")
+def BufferDelPathFromLib(path):
+
+	return Buffer.delPathFromLib(String.Decode(path))	
+
+
 ###############################################################################
 # UTIL METHODS
 ###############################################################################
 
+def DictDefault(key, default):
+
+	if not key in Dict:
+		Dict[key] = default
+		
+	return Dict[key]
+	
 ###############################################################################
 # 
 def need_watched_indicator(type):

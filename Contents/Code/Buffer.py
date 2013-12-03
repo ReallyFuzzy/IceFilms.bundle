@@ -4,6 +4,7 @@ import os
 import socket
 import shutil
 
+from HTTPBetterErrorProcessor import HTTPBetterErrorProcessor
 from urllib2 import HTTPError
 
 
@@ -1256,3 +1257,162 @@ class BufferItem(object):
 	
 		return str(self.item)
 		
+
+###################################################################################################
+# HELPER METHODS
+###################################################################################################
+
+'''
+	Add the given path to the Pre-Buffer Plex Library, creating the latter if it doesn't 
+	already exist.
+	
+	Returns the path to the library as a string.
+'''
+def addPathToLib(filePath):
+
+	semaphore = Thread.Semaphore("PRE_BUFFER_LIB_OP")
+	semaphore.acquire()
+	
+	try:
+	
+		filePath = os.path.dirname(filePath)
+		
+		# Check if we already have a pre-buffer library....
+		request = urllib2.Request("http://127.0.0.1:32400/library/sections/")
+		response = urllib2.urlopen(request)
+		
+		content = response.read()
+		elem = XML.ElementFromString(content)
+		dirElems = elem.xpath("//Directory[@title='PreBuffer Play']")
+		
+		if (len(dirElems) > 0):
+		
+			# We do... Get the section ID out.
+			libURL = "/library/sections/%s" % dirElems[0].get('key')
+			
+			# Get the current paths out.
+			alreadySet = False
+			paths = []
+			
+			for pathElem in dirElems[0].xpath("./Location"):
+			
+				locPath = pathElem.get('path')
+				if locPath == filePath or locPath == (filePath + os.sep):
+					alreadySet = True
+				
+				paths.append(("location",locPath))
+				
+			if not alreadySet:
+				paths.append(("location", filePath))
+				Log("*** Trying to add %s to library %s" % (filePath, libURL))
+				request = urllib2.Request("http://127.0.0.1:32400" + libURL + "?" + urllib.urlencode(paths))
+				request.get_method = lambda: 'PUT'
+				response = urllib2.urlopen(request)
+			else:
+				Log("*** Path %s already in library %s"  % (filePath, libURL))
+			
+		else:
+		
+			# We don't so Create a library for the folder above.
+			#
+			# Create an opener that understands 201 status codes returned by Plex.
+			opener = urllib2.build_opener(HTTPBetterErrorProcessor)
+			
+			request = urllib2.Request(
+				"http://127.0.0.1:32400/library/sections?" +
+				"type=movie" +
+				"&agent=com.plexapp.agents.none" +
+				"&scanner=Plex+Video+Files+Scanner" +
+				"&language=xn" +
+				"&location=" + urllib.quote_plus(filePath) +
+				"&name=PreBuffer+Play",
+			)
+			
+			response = opener.open(request,"")
+				
+			# Pick up Location header which contains our Library ID.
+			libURL = response.info()["Location"]
+		
+		# Refresh the library.
+		opener = urllib2.build_opener(HTTPBetterErrorProcessor)
+		request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/refresh")
+		response = opener.open(request)
+		
+		return libURL
+		
+	finally:
+		semaphore.release()
+
+'''
+	Delete the given path to the Pre-Buffer Plex Library if the library exists and the
+	path is set as a location for the library.
+	
+	Returns nothing.
+'''
+def delPathFromLib(filePath):
+
+	semaphore = Thread.Semaphore("PRE_BUFFER_LIB_OP")
+	semaphore.acquire()
+	
+	try:
+	
+		filePath = os.path.dirname(filePath)
+		
+		# Check if we already have a pre-buffer library....
+		request = urllib2.Request("http://127.0.0.1:32400/library/sections/")
+		response = urllib2.urlopen(request)
+		
+		content = response.read()
+		elem = XML.ElementFromString(content)
+		dirElems = elem.xpath("//Directory[@title='PreBuffer Play']")
+		
+		if (len(dirElems) > 0):
+		
+			# We do... Get the section ID out.
+			libURL = "/library/sections/%s" % dirElems[0].get('key')
+			
+			# Get the current paths out.
+			pathFound = False
+			paths = []
+			
+			for pathElem in dirElems[0].xpath("./Location"):
+			
+				locPath = pathElem.get('path')
+				if locPath == filePath or locPath == (filePath + os.sep):
+					pathFound = True
+				else:
+					paths.append(("location",locPath))
+				
+			if pathFound:
+			
+				if (len(paths) <= 0):
+					Log("*** Delete Library as only path left is one to be deleted.")
+					request = urllib2.Request("http://127.0.0.1:32400" + libURL)
+					request.get_method = lambda: 'DELETE'
+					response = urllib2.urlopen(request)
+				else:
+					Log("*** Trying to del %s from library %s" % (filePath, libURL))
+					request = urllib2.Request("http://127.0.0.1:32400" + libURL + "?" + urllib.urlencode(paths))
+					request.get_method = lambda: 'PUT'
+					response = urllib2.urlopen(request)
+					
+					# Refresh the library.
+					opener = urllib2.build_opener(HTTPBetterErrorProcessor)
+					request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/refresh")
+					response = opener.open(request)
+
+			else:
+				Log("*** Path %s not currentl in library %s"  % (filePath, libURL))
+			
+		else:
+		
+			# We don't. Nothing to do.
+			Log("*** Couldn't delete path %s from pre-buffer library. Library dosen't exist." % filePath)
+		
+				
+	finally:
+		semaphore.release()
+		
+	return ""
+
+

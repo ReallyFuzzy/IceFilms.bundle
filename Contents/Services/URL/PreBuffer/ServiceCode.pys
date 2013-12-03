@@ -2,6 +2,7 @@ import os
 import tempfile
 import urllib, urllib2
 import time
+import os
 from threading import Thread
 
 def NormalizeURL(url):
@@ -24,8 +25,8 @@ def MediaObjectsForURL(url):
 	
 @indirect
 def PlayVideo(url):
-
-	file = url.replace("prebuffer://","")
+	
+	video_prefix = "/video/icefilms"
 	
 	# Welcome to crazy town....
 	#
@@ -45,31 +46,14 @@ def PlayVideo(url):
 	# anything about the buffered item), do support a file:// URL but only if it doesn't contain
 	# space, which won't be the case for us due to where we save the buffered items.
 
-	filePath = os.path.dirname(file)
+	file = url.replace("prebuffer://","")
 	
-	# Create a library for the tmp folder above.
-	#
-	# Create an opener that understands 201 status codes returned by Plex.
-	opener = urllib2.build_opener(HTTPBetterErrorProcessor)
-	
+	# Ask plugin to add path to Lib.
 	request = urllib2.Request(
-		"http://127.0.0.1:32400/library/sections?" +
-		"type=movie" +
-		"&agent=com.plexapp.agents.none" +
-		"&scanner=Plex+Video+Files+Scanner" +
-		"&language=xn" +
-		"&location=" + urllib.quote_plus(filePath) +
-		"&name=PreBuffer+Play",
+		"http://127.0.0.1:32400%s/prebuffer/addPathToLib/%s" % (video_prefix, String.Encode(file))
 	)
-	
-	response = opener.open(request,"")
-		
-	# Pick up Location header which contains our Library ID.
-	libURL = response.info()["Location"]
-	
-	# Refresh the library.
-	request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/refresh")
-	response = opener.open(request)
+	response = urllib2.urlopen(request)
+	libURL = response.read()
 	
 	fileURL = None
 	cnt = 0
@@ -79,7 +63,7 @@ def PlayVideo(url):
 	
 		# Get the play ID of the item and send that to client.
 		request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/all")
-		response = opener.open(request)
+		response = urllib2.urlopen(request)
 		
 		# Look for the one and only media item in there with our name.
 		content = response.read()
@@ -90,15 +74,16 @@ def PlayVideo(url):
 			fileURL = partElems[0].get("key")
 			break
 		else:
+			Log("Failed to get part for item %s" % file)
 			cnt = cnt + 1
 	
 	# Schedule for the library to be removed.
-	CleanupAgent(libURL).start()
+	CleanupAgent(url).start()
 	
 	if (fileURL is None):
 		pass
 	else:
-	
+		
 		return ObjectContainer(
 			objects = [
 				VideoClipObject(
@@ -116,28 +101,68 @@ def PlayVideo(url):
 
 class CleanupAgent(Thread):
 
-	def __init__(self, libURL):
+	def __init__(self, url):
+	
 		Thread.__init__(self)
-		self.libURL = libURL
+		self.url = url
 		
 	def run(self):
 	
-		time.sleep(5)
+		Log("*** Spending 30 secs checking whether item ends up in seesion")
+		cnt = 0
+		while (cnt < 30 and not self.isInSession(self.url)):
+			time.sleep(1)
+			cnt = cnt + 1
+			
+		if self.isInSession(self.url):
 		
-		request = urllib2.Request("http://127.0.0.1:32400" + self.libURL)
-		request.get_method = lambda: 'DELETE'
-		urllib2.urlopen(request)
+			Log("*** Player in session!")
+			while self.isInSession(self.url):
+					
+				Log("*** Sleepng till next in session check")
+				time.sleep(1)
+				
+			Log("*** Player no longer in session")
+			# Check if anyone else is using the library.
+			video_prefix = "/video/icefilms"
+			file = self.url.replace("prebuffer://","")
+	
+			# Ask plugin to remove path from Lib.
+			Log("*** Deleting %s from lib" % file)
+			request = urllib2.Request(
+				"http://127.0.0.1:32400%s/prebuffer/delPathFromLib/%s" % (video_prefix, String.Encode(file))
+			)
+			
+			try:
+				response = urllib2.urlopen(request)
+			except Exception, ex:
+				Log.Exception(ex)
 		
-class HTTPBetterErrorProcessor(urllib2.HTTPErrorProcessor):
-
-	def http_response(self, request, response):
+			Log("*** Done")
+			
+		else:
+			Log("*** Player not in session. Cleanup will need to be done base on ClientID. Terminating.")
+		
+	def isInSession(self, url):
 	
-		code, msg, hdrs = response.code, response.msg, response.info()
-	
-		# was: if code not in (200, 206):
-		if not (200 <= code < 300):
-			response = self.parent.error('http', request, response, code, msg, hdrs)
-	
-		return response
-
-	https_response = http_response
+		#Log("*** Checking if item is in session")
+		
+		try:
+			# Monitor /status/sessions.
+			request = urllib2.Request("http://127.0.0.1:32400/status/sessions")
+			
+			# FIXME: This may throw a 404...
+			response = urllib2.urlopen(request)
+			
+			# Look for the one and only media item in there with our name.
+			content = response.read()
+			elem = XML.ElementFromString(content)
+			
+			partElems = elem.xpath("//Video[@url='%s']" % url)
+		
+			return len(partElems) > 0
+			
+		except Exception, ex:
+			
+			Log.Exception(ex)
+			
