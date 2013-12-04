@@ -76,21 +76,38 @@ class BufferManager(object):
 		
 		if len(sources) == 1:
 			return len(sources[0]['parts'])
-		
+	
 	def fileLoc(self, url, partIndex):
 	
 		item = self.item(url)
 		
-		if (item is not None and item['outputDir'] is not None):
+		if item is not None:
 		
 			sources = [source for source in item['sources'] if source['status'] == 'FINISHED']
 			
 			if len(sources) == 1:
 			
-				return os.path.join(item['outputDir'], sources[0]['parts'][partIndex]['file'])
+				return sources[0]['parts'][partIndex]['file']
+				
+	def playURL(self, url, partIndex):
+	
+		item = self.item(url)
+		
+		if item is not None:
+		
+			sources = [source for source in item['sources'] if source['status'] == 'FINISHED']
+			
+			if len(sources) == 1:
+			
+				part = sources[0]['parts'][partIndex]
+				
+				if ('info' in part):
+					return "prebuffer://%s?%s" % (part['file'], urllib.urlencode(part['info']))
+				else:
+					return "prebuffer://%s" % part['file']
 	
 		return None
-			
+	
 	def adtlInfo(self, url):
 	
 		if (self.hasItem(url) and 'adtlInfo' in self.item(url)):
@@ -697,7 +714,16 @@ class BufferItem(object):
 					# Check each part has succesfully downloaded.
 					allOk = True
 					for part in source['parts']:
-						if (part['size'] != part['downloaded']):
+					
+						if (part['size'] == part['downloaded']):
+			
+							# Store media info about file so that plugin can 
+							# generate sane-ish media items.
+							part['info'] = plexInfoForFile(
+								part['file'], "PreBuffer Stats", delFromLib=True
+							)
+							
+						else:
 							allOk = False
 							break
 					
@@ -1313,14 +1339,68 @@ class BufferItem(object):
 ###################################################################################################
 
 '''
+	Given a file, add it to a Plex library, let Plex scan and it and then extract out
+	information about the file.
+
+	This is used when a preBuffer item has finished downloading to retrieve meta info
+	about the file so that it can be passed on to the PreBuffer URL service so that it
+	may return a fully populated media item, which in turns should give clients a much
+	better chance of working out whether they'll need to transcode.
+
+	This is also used when a user chooses to actually play a file to add the item to a
+	library and retrieve the item's URL to play.
+'''
+def plexInfoForFile(filePath, libName, delFromLib=False):
+	
+	libURL = addPathToLib(filePath, libName)
+	
+	cnt = 0
+	info = {}
+	
+	while (cnt <= 5):
+
+		Thread.Sleep(2)
+	
+		# Get the play ID of the item and send that to client.
+		request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/all")
+		response = urllib2.urlopen(request)
+		
+		# Look for the one and only media item in there with our name.
+		content = response.read()
+		elem = XML.ElementFromString(content)
+		partElems = elem.xpath("//Part[@file='%s']" % filePath)
+	
+		
+		if (len(partElems) > 0):
+			info['fileURL'] = partElems[0].get("key")
+			mediaElem = partElems[0].getparent()
+			mediaElemAttribs = mediaElem.keys()
+			
+			for item in ['videoResolution', 'duration', 'bitrate', 'aspectRatio', 'audioCodec', 'videoCodec', 'container', 'videoFrameRate']:
+				if (item in mediaElemAttribs):
+					info[item] = mediaElem.get(item)
+			
+			break
+			
+		else:
+			Log("Failed to get part for item %s" % file)
+			cnt = cnt + 1
+			
+	if delFromLib:
+		delPathFromLib(filePath, libName)
+		
+	Log(info)
+	return info
+	
+'''
 	Add the given path to the Pre-Buffer Plex Library, creating the latter if it doesn't 
 	already exist.
 	
 	Returns the path to the library as a string.
 '''
-def addPathToLib(filePath):
+def addPathToLib(filePath, libName):
 
-	semaphore = Thread.Semaphore("PRE_BUFFER_LIB_OP")
+	semaphore = Thread.Semaphore("PRE_BUFFER_LIB_OP_" + libName)
 	semaphore.acquire()
 	
 	try:
@@ -1333,7 +1413,7 @@ def addPathToLib(filePath):
 		
 		content = response.read()
 		elem = XML.ElementFromString(content)
-		dirElems = elem.xpath("//Directory[@title='PreBuffer Play']")
+		dirElems = elem.xpath("//Directory[@title='%s']" % libName)
 		
 		if (len(dirElems) > 0):
 		
@@ -1370,12 +1450,14 @@ def addPathToLib(filePath):
 			
 			request = urllib2.Request(
 				"http://127.0.0.1:32400/library/sections?" +
-				"type=movie" +
-				"&agent=com.plexapp.agents.none" +
-				"&scanner=Plex+Video+Files+Scanner" +
-				"&language=xn" +
-				"&location=" + urllib.quote_plus(filePath) +
-				"&name=PreBuffer+Play",
+				urllib.urlencode({
+					'type': 'movie',
+					'agent': 'com.plexapp.agents.none',
+					'scanner': 'Plex Video Files Scanner',
+					'language': 'xn',
+					'location': filePath,
+					'name': libName,
+				})
 			)
 			
 			response = opener.open(request,"")
@@ -1399,9 +1481,9 @@ def addPathToLib(filePath):
 	
 	Returns nothing.
 '''
-def delPathFromLib(filePath):
+def delPathFromLib(filePath, libName):
 
-	semaphore = Thread.Semaphore("PRE_BUFFER_LIB_OP")
+	semaphore = Thread.Semaphore("PRE_BUFFER_LIB_OP_" + libName)
 	semaphore.acquire()
 	
 	try:
@@ -1414,7 +1496,7 @@ def delPathFromLib(filePath):
 		
 		content = response.read()
 		elem = XML.ElementFromString(content)
-		dirElems = elem.xpath("//Directory[@title='PreBuffer Play']")
+		dirElems = elem.xpath("//Directory[@title='%s']" % libName)
 		
 		if (len(dirElems) > 0):
 		
@@ -1464,5 +1546,3 @@ def delPathFromLib(filePath):
 		semaphore.release()
 		
 	return ""
-
-

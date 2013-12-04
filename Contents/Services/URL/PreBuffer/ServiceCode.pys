@@ -1,6 +1,6 @@
 import os
 import tempfile
-import urllib, urllib2
+import urllib, urllib2, urlparse, cgi
 import time
 import os
 from threading import Thread
@@ -14,14 +14,44 @@ def MetadataObjectForURL(url):
 	return VideoClipObject(title = 'PreBuffer Redirect Page')
 	
 def MediaObjectsForURL(url):
+	
+	# Breakdown URL.
+	urlParts = urlparse.urlparse(url.replace("prebuffer://","http://"))
+	qs = cgi.parse_qs(urlParts.query)
+		
+	mediaObject = MediaObject(
+		parts = [ 
+			PartObject(key=Callback(PlayVideo,url=url)) 
+		] 
+	)
 
-	return [
-		MediaObject(
-			parts = [
-				PartObject(key=Callback(PlayVideo,url=url))
-			],
-		)
-	]
+	if ('bitrate' in qs and len(qs['bitrate']) == 1):
+		mediaObject.bitrate = int(qs['bitrate'][0])
+		
+	if (' aspectRatio' in qs and len(qs['aspectRatio']) == 1):
+		mediaObject.aspect_ratio = float(qs['aspectRatio'][0])
+
+	if ('videoResolution' in qs and len(qs['videoResolution']) == 1):
+		mediaObject.video_resolution = int(qs['videoResolution'][0])
+			
+	if ('duration' in qs and len(qs['duration']) == 1):
+		mediaObject.duration = int(qs['duration'][0])
+		
+	if ('videoCodec' in qs and len(qs['videoCodec']) == 1):
+		if qs['videoCodec'][0] == 'h264':
+			mediaObject.video_codec = VideoCodec.H264
+			
+	if ('audioCodec' in qs and len(qs['audioCodec']) == 1):
+		if qs['audioCodec'][0] == 'aac':
+			mediaObject.audio_codec = AudioCodec.AAC
+		elif qs['audioCodec'][0] == 'mp3':
+			mediaObject.audio_codec = AudioCodec.MP3
+		
+	if ('container' in qs and len(qs['container']) == 1):
+		if qs['container'][0] == 'mov':
+			mediaObject.container = Container.MOV
+
+	return [mediaObject]
 	
 @indirect
 def PlayVideo(url):
@@ -45,52 +75,31 @@ def PlayVideo(url):
 	# machine. Remaining clients (which will ask for the file to be transcoded since we don't know
 	# anything about the buffered item), do support a file:// URL but only if it doesn't contain
 	# space, which won't be the case for us due to where we save the buffered items.
-
-	file = url.replace("prebuffer://","")
 	
-	# Ask plugin to add path to Lib.
+	# Breakdown URL.
+	urlParts = urlparse.urlparse(url.replace("prebuffer://","http://"))
+	file = urlParts.path
+	
+	# Ask plugin to add video to a library and give us the part url back.
+	# This could be done directly in here, but this way allows for code to be re-used
+	# across this service and the plugin.
 	request = urllib2.Request(
-		"http://127.0.0.1:32400%s/prebuffer/addPathToLib/%s" % (video_prefix, String.Encode(file))
+		"http://127.0.0.1:32400%s/prebuffer/filePlayInfo/%s" % (video_prefix, String.Encode(file))
 	)
 	response = urllib2.urlopen(request)
-	libURL = response.read()
-	
-	fileURL = None
-	cnt = 0
-	while (cnt <= 5):
-
-		time.sleep(2)
-	
-		# Get the play ID of the item and send that to client.
-		request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/all")
-		response = urllib2.urlopen(request)
-		
-		# Look for the one and only media item in there with our name.
-		content = response.read()
-		elem = XML.ElementFromString(content)
-		partElems = elem.xpath("//Part[@file='%s']" % file)
-	
-		if (len(partElems) > 0):
-			fileURL = partElems[0].get("key")
-			break
-		else:
-			Log("Failed to get part for item %s" % file)
-			cnt = cnt + 1
+	fileInfo = JSON.ObjectFromString(response.read())
 	
 	# Schedule for the library to be removed.
 	CleanupAgent(url).start()
 	
-	if (fileURL is None):
-		pass
-	else:
-		
+	if ('fileURL' in fileInfo):
 		return ObjectContainer(
 			objects = [
 				VideoClipObject(
 					items = [
 						MediaObject(
 							parts = [
-								PartObject(key=fileURL),
+								PartObject(key=fileInfo['fileURL']),
 							],
 						)
 					]
@@ -119,7 +128,7 @@ class CleanupAgent(Thread):
 			Log("*** Player in session!")
 			while self.isInSession(self.url):
 					
-				Log("*** Sleepng till next in session check")
+				#Log("*** Sleepng till next in session check")
 				time.sleep(1)
 				
 			Log("*** Player no longer in session")

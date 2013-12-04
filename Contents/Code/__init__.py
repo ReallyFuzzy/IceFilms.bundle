@@ -1040,7 +1040,7 @@ def SourcesOrBufferMenu(mediainfo=None, url=None, item_name=None, path=[], paren
 			
 		oc.add(
 			MovieObject(
-				url="prebuffer://" + buffer.fileLoc(url, cnt),
+				url="prebuffer://" + buffer.playURL(url, cnt),
 				title=title
 			)
 		)
@@ -1655,7 +1655,7 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 					
 				oc.add(
 					MovieObject(
-						url="prebuffer://" + buffer.fileLoc(url, cnt),
+						url=buffer.playURL(url, cnt),
 						title=title
 					)
 				)
@@ -3376,15 +3376,23 @@ def KeepAlive():
 @route(VIDEO_PREFIX + "/prebuffer/addPathToLib/{path}")
 def BufferAddPathToLib(path):
 
-	return Buffer.addPathToLib(String.Decode(path))
+	return Buffer.addPathToLib(String.Decode(path), "PreBuffer Play")
 	
 ####################################################################################################
 
 @route(VIDEO_PREFIX + "/prebuffer/delPathFromLib/{path}")
 def BufferDelPathFromLib(path):
 
-	return Buffer.delPathFromLib(String.Decode(path))	
+	return Buffer.delPathFromLib(String.Decode(path), "PreBuffer Play")
 
+####################################################################################################
+
+@route(VIDEO_PREFIX + "/prebuffer/filePlayInfo/{path}")
+def BufferPlayInfoForFile(path):
+
+	return JSON.StringFromObject(
+		Buffer.plexInfoForFile(String.Decode(path), "PreBuffer Play")
+	)
 
 ###############################################################################
 # UTIL METHODS
