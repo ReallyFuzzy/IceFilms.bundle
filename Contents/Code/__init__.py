@@ -54,11 +54,16 @@ PREFS_ICON = 'icon-prefs.png'
 SEARCH_ICON='icon-search.png'
 MOVIE_ICON='icon-movie.png'
 TV_ICON='icon-tv.png'
-BUFFER_ICON='icon-buffer.png'
-ADDITIONAL_SOURCES_ICON='icon-additional-sources.png'
 STANDUP_ICON='icon-standup.png'
-GENRE_BASE='icon-genre'
-GENRE_ICON=GENRE_BASE + '.png'
+
+BUFFER_ICON='icon-buffer.png'
+BUFFER_STATE_ICON='icon-buffer-%s.png'
+
+ADDITIONAL_SOURCES_ICON='icon-additional-sources.png'
+
+GENRE_ICON='icon-genre.png'
+GENRE_SUB_ICON='icon-genre-%s.png'
+
 TAG_ICON='icon-tag-%s.png'
 TAG_ICON_COLOUR=['red','orange','yellow','green','cyan','blue','purple']
 
@@ -493,7 +498,7 @@ def GenreMenu(type=None, path=None, parent_name=None):
 		
 	for genre in Site.GetGenres():
 	
-		icon = R(GENRE_BASE + "-" + genre.lower() + ".png")
+		icon = R(GENRE_SUB_ICON % genre.lower())
 		if icon is None:
 			("Couldn't find icon for genre: " + genre.lower())
 			icon = R(GENRE_ICON)
@@ -1591,6 +1596,7 @@ def BufferMenu(parent_name=None, replace_parent=False):
 				DirectoryObject(
 					key=Callback(BufferMenu, parent_name=parent_name, replace_parent=True),
 					title= "-- " + groupKey + ' --',
+					thumb=R(BUFFER_STATE_ICON % groupKey.lower().replace(" ","")),
 					summary = summaries[groupKey] + "\n\n" + "Click to refresh list",
 				)
 			)
