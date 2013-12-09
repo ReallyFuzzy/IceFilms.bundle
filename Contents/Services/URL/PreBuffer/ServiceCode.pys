@@ -28,11 +28,20 @@ def MediaObjectsForURL(url):
 	if ('bitrate' in qs and len(qs['bitrate']) == 1):
 		mediaObject.bitrate = int(qs['bitrate'][0])
 		
-	if (' aspectRatio' in qs and len(qs['aspectRatio']) == 1):
+	if ('aspectRatio' in qs and len(qs['aspectRatio']) == 1):
 		mediaObject.aspect_ratio = float(qs['aspectRatio'][0])
 
 	if ('videoResolution' in qs and len(qs['videoResolution']) == 1):
-		mediaObject.video_resolution = int(qs['videoResolution'][0])
+		try:
+			mediaObject.video_resolution = int(qs['videoResolution'][0])
+		except:
+			pass
+			
+	if (mediaObject.video_resolution is None and 'height' in qs and len(qs['height']) == 1):
+		try:
+			mediaObject.video_resolution = int(qs['height'][0])
+		except:
+			pass
 			
 	if ('duration' in qs and len(qs['duration']) == 1):
 		mediaObject.duration = int(qs['duration'][0])
@@ -56,14 +65,12 @@ def MediaObjectsForURL(url):
 @indirect
 def PlayVideo(url):
 	
-	video_prefix = "/video/icefilms"
-	
 	# Welcome to crazy town....
 	#
 	# Plex doesn't handle local files if they're not in a user library. So, temporarily add 
 	# the file to play to one...
 	#
-	#ÊThere supposedly is a way to stream any file off the local file system (Stream.LocalFile 
+	#Â There supposedly is a way to stream any file off the local file system (Stream.LocalFile 
 	# from StreamKit), but that's currently broken and I doubt that it'll get fixed. Serving
 	# the file via the Plugin's tornado Web Server instance using R() leads to very poor 
 	# performance as does spinning up our own tornado instance and serving from there.
@@ -78,19 +85,25 @@ def PlayVideo(url):
 	
 	# Breakdown URL.
 	urlParts = urlparse.urlparse(url.replace("prebuffer://","http://"))
-	file = urlParts.path
+	pathParts = urlParts.path.split("/")
+	
+	Log(pathParts)
+	# Extract out videoPrefix, encoded pre-buffer key / url and part index.
+	videoPrefix = "/".join(pathParts[0:-2])
+	encodedKey = pathParts[-2]
+	partIndex = pathParts[-1]
 	
 	# Ask plugin to add video to a library and give us the part url back.
 	# This could be done directly in here, but this way allows for code to be re-used
 	# across this service and the plugin.
 	request = urllib2.Request(
-		"http://127.0.0.1:32400%s/prebuffer/filePlayInfo/%s" % (video_prefix, String.Encode(file))
+		"http://127.0.0.1:32400%s/prebuffer/playback/%s/%s" % (videoPrefix, encodedKey, partIndex)
 	)
 	response = urllib2.urlopen(request)
 	fileInfo = JSON.ObjectFromString(response.read())
 	
 	# Schedule for the library to be removed.
-	CleanupAgent(url).start()
+	CleanupAgent(videoPrefix, url, fileInfo['filePath']).start()
 	
 	if ('fileURL' in fileInfo):
 		return ObjectContainer(
@@ -110,10 +123,12 @@ def PlayVideo(url):
 
 class CleanupAgent(Thread):
 
-	def __init__(self, url):
+	def __init__(self, videoPrefix, url, path):
 	
 		Thread.__init__(self)
+		self.videoPrefix = videoPrefix
 		self.url = url
+		self.path = path
 		
 	def run(self):
 	
@@ -132,14 +147,11 @@ class CleanupAgent(Thread):
 				time.sleep(1)
 				
 			Log("*** Player no longer in session")
-			# Check if anyone else is using the library.
-			video_prefix = "/video/icefilms"
-			file = self.url.replace("prebuffer://","")
 	
 			# Ask plugin to remove path from Lib.
-			Log("*** Deleting %s from lib" % file)
+			Log("*** Deleting %s from lib" % self.path)
 			request = urllib2.Request(
-				"http://127.0.0.1:32400%s/prebuffer/delPathFromLib/%s" % (video_prefix, String.Encode(file))
+				"http://127.0.0.1:32400%s/prebuffer/delPathFromLib/%s" % (self.videoPrefix, String.Encode(self.path))
 			)
 			
 			try:
@@ -173,5 +185,5 @@ class CleanupAgent(Thread):
 			
 		except Exception, ex:
 			
-			Log.Exception(ex)
+			Log.Exception("*** Error whilst checking item is in session")
 			

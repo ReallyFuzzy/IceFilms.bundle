@@ -134,19 +134,26 @@ def MediaObjectsForURL(url):
 		
 	else:
 	
+		provider_url_parts = urlparse.urlparse(url)
+		provider_url_qs = cgi.parse_qs(provider_url_parts.query)
+
+		mark_played = True		
+		if ('markPlayed' in provider_url_qs):
+			mark_played = int(provider_url_qs['markPlayed']) > 0
+			
 		# Delay working out the real provider's URL until video is picked.
-		# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id
+		# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id?params
 		return [
 			MediaObject(
-				parts = [PartObject(key=Callback(PlayVideo, url=url))],
+				parts = [PartObject(key=Callback(PlayVideo, url=url, mark_played=mark_played))],
 			)
 		]
 
 @indirect
-def PlayVideo(url):
+def PlayVideo(url, mark_played=True):
 
 	provider_url = GetSourceFromURL(url)
-	return PlayProviderVideo(url, provider_url)
+	return PlayProviderVideo(url, provider_url, mark_played)
 	
 @indirect
 def PlayCaptchaVideo(browse_url, provider_url):
@@ -154,7 +161,7 @@ def PlayCaptchaVideo(browse_url, provider_url):
 	return PlayProviderVideo(browse_url, provider_url)
 	
 	
-def PlayProviderVideo(browse_url, provider_url):
+def PlayProviderVideo(browse_url, provider_url, mark_played=True):
 
 	media_objects = URLService.MediaObjectsForURL(provider_url)
 	
@@ -178,7 +185,7 @@ def PlayProviderVideo(browse_url, provider_url):
 		response_obj = XML.ElementFromString(response)		
 		media_objects[0].parts[0].key = response_obj.xpath("//Part/@key")[0]
 		
-	if (len(media_objects) > 0):
+	if (len(media_objects) > 0 and mark_played):
 		PlaybackStarted(url=browse_url)
 		
 	return ObjectContainer(

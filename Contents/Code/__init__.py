@@ -1040,7 +1040,7 @@ def SourcesOrBufferMenu(mediainfo=None, url=None, item_name=None, path=[], paren
 			
 		oc.add(
 			MovieObject(
-				url="prebuffer://" + buffer.playURL(url, cnt),
+				url=buffer.playURL(VIDEO_PREFIX, url, cnt),
 				title=title
 			)
 		)
@@ -1655,7 +1655,7 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 					
 				oc.add(
 					MovieObject(
-						url=buffer.playURL(url, cnt),
+						url=buffer.playURL(VIDEO_PREFIX, url, cnt),
 						title=title
 					)
 				)
@@ -3181,7 +3181,56 @@ def MediaInfoLookup(url):
 
 
 ####################################################################################################
-# LMWT Plugin specific helper methods.
+# URL SERVICES METHODS
+#
+# Method that help URL services communicate and interact with plugin.
+####################################################################################################
+
+@route(KEEP_ALIVE_PATH)
+def KeepAlive():
+
+	# A simple method which can be called to make sure the plugin stays within Plex's inactivity 
+	# timeout period and doesn't get killed. Especially useful for long running threads....
+	Log(KEEP_ALIVE_PATH)
+	
+	return "ALIVE"
+	
+####################################################################################################
+
+@route(VIDEO_PREFIX + "/prebuffer/delPathFromLib/{path}")
+def BufferDelPathFromLib(path):
+
+	return Buffer.delPathFromLib(String.Decode(path), "PreBuffer Play")
+
+####################################################################################################
+
+@route(VIDEO_PREFIX + '/prebuffer/playback/{url}/{partIndex}')
+def BufferPlayback(url, partIndex):
+
+	buffer = BufferManager.instance()
+	
+	# Get a URL the Buffer() instance can work with.
+	decodedURL = String.Decode(url)
+	
+	# Get the path for the given pre-buffer item and part index.
+	path = buffer.fileLoc(decodedURL, int(partIndex))
+	
+	# Add it to a Plex library and return Plex's internal URL for the item.
+	retInfo = {
+		'fileURL': Buffer.plexInfoForFile(path, "PreBuffer Play")['fileURL'],
+		'filePath': path
+	}
+	
+	# Get the additional info we stored against the pre-buffer item when we created it.
+	adtl_info = buffer.adtlInfo(decodedURL)
+	
+	# Mark the item as played within the plugin's internal structures.
+	PlaybackMarkWatched(adtl_info['mediainfo'], adtl_info['path'])
+	
+	# Return part's Plex's URL to caller.
+	return JSON.StringFromObject(retInfo)
+	
+####################################################################################################
 
 @route(VIDEO_PREFIX + '/playback/{url}')
 def PlaybackStarted(url):
@@ -3359,40 +3408,6 @@ def CheckAdditionalSources(sources):
 			Log.Exception("Error working out what additional sources are available.")
 			pass
 
-
-####################################################################################################
-#
-@route(KEEP_ALIVE_PATH)
-def KeepAlive():
-
-	# A simple method which can be called to make sure the plugin stays within Plex's inactivity 
-	# timeout period and doesn't get killed. Especially useful for long running threads....
-	Log(KEEP_ALIVE_PATH)
-	
-	return "ALIVE"
-
-####################################################################################################
-	
-@route(VIDEO_PREFIX + "/prebuffer/addPathToLib/{path}")
-def BufferAddPathToLib(path):
-
-	return Buffer.addPathToLib(String.Decode(path), "PreBuffer Play")
-	
-####################################################################################################
-
-@route(VIDEO_PREFIX + "/prebuffer/delPathFromLib/{path}")
-def BufferDelPathFromLib(path):
-
-	return Buffer.delPathFromLib(String.Decode(path), "PreBuffer Play")
-
-####################################################################################################
-
-@route(VIDEO_PREFIX + "/prebuffer/filePlayInfo/{path}")
-def BufferPlayInfoForFile(path):
-
-	return JSON.StringFromObject(
-		Buffer.plexInfoForFile(String.Decode(path), "PreBuffer Play")
-	)
 
 ###############################################################################
 # UTIL METHODS

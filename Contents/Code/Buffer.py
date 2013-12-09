@@ -5,7 +5,7 @@ import socket
 import shutil
 
 from HTTPBetterErrorProcessor import HTTPBetterErrorProcessor
-from urllib2 import HTTPError
+from urllib2 import HTTPError, URLError
 
 
 		
@@ -89,9 +89,11 @@ class BufferManager(object):
 			
 				return sources[0]['parts'][partIndex]['file']
 				
-	def playURL(self, url, partIndex):
+	def playURL(self, videoPrefix, url, partIndex):
 	
 		item = self.item(url)
+		
+		encodedURL = String.Encode(url)
 		
 		if item is not None:
 		
@@ -102,9 +104,9 @@ class BufferManager(object):
 				part = sources[0]['parts'][partIndex]
 				
 				if ('info' in part):
-					return "prebuffer://%s?%s" % (part['file'], urllib.urlencode(part['info']))
+					return "prebuffer://%s/%s/%s?%s" % (videoPrefix, encodedURL, partIndex, urllib.urlencode(part['info']))
 				else:
-					return "prebuffer://%s" % part['file']
+					return "prebuffer://%s/%s/%s" % (videoPrefix, encodedURL , partIndex)
 	
 		return None
 	
@@ -722,6 +724,7 @@ class BufferItem(object):
 							part['info'] = plexInfoForFile(
 								part['file'], "PreBuffer Stats", delFromLib=True
 							)
+							#Log(part['info'])
 							
 						else:
 							allOk = False
@@ -781,29 +784,36 @@ class BufferItem(object):
 			
 				# Get the size of the parts and make sure they're still the same.
 				allOk = True
-				for part in source['parts']:
-					
-					if (not self.okToDownload()):
-						return
 				
-					request = urllib2.urlopen(part['finalUrl'])
-					request.get_method = lambda : 'HEAD'
-					meta = request.info()
-					
-					size = int(meta.getheaders('Content-Length')[0])
-					
-					if (part['size'] != size):
-						# Looks like the item has changed? Abort.
-						Log('*** File Size has changed since item was stopped from %s to %s. Dumping source and starting over.' % (part['size'], size))
-						allOk = False
-						break
+				try:
+				
+					for part in source['parts']:
 						
+						if (not self.okToDownload()):
+							return
+					
+						request = urllib2.urlopen(part['finalUrl'])
+						request.get_method = lambda : 'HEAD'
+						meta = request.info()
+						
+						size = int(meta.getheaders('Content-Length')[0])
+						
+						if (part['size'] != size):
+							# Looks like the item has changed? Abort.
+							Log('*** File Size has changed since item was stopped from %s to %s. Dumping source and starting over.' % (part['size'], size))
+							allOk = False
+							break
+				
+				except:
+					Log.Exception("*** Error encountered whilst trying to check if previously used source was still the same.")
+					allOk = False
+
 				# If we get here and allOk is still set, then we're good
 				# to carry on with previous download.
 				if (allOk):
 					Log('Source is still available and the same size. Continuing buffer')
 					return source
-				
+					
 			else:
 			
 				# Looks like the item is no longer available. Pick another source.
@@ -868,7 +878,9 @@ class BufferItem(object):
 				if (not self.okToDownload()):
 					return
 
-				mediaObjects = URLService.MediaObjectsForURL(part['unresolvedUrl'])
+				Log("*** Resolving url for part: %s" % part)
+				
+				mediaObjects = URLService.MediaObjectsForURL(part['unresolvedUrl'] + "?markPlayed=0")
 				partUrl = mediaObjects[0].parts[0].key
 	
 				# Manually resolve any indirect URLs..
@@ -964,7 +976,7 @@ class BufferItem(object):
 			self.downloadURL(part['finalUrl'], part['file'], startByte)
 			Log('*** Finished / Stopped downloading of part: %s' % part)
 			
-		except HTTPError, ex:
+		except (URLError, HTTPError), ex:
 			
 			# Something went wrong trying to open URL....
 			Log.Exception('*** Download Error...')
@@ -1369,21 +1381,24 @@ def plexInfoForFile(filePath, libName, delFromLib=False):
 		content = response.read()
 		elem = XML.ElementFromString(content)
 		partElems = elem.xpath("//Part[@file='%s']" % filePath)
-	
 		
 		if (len(partElems) > 0):
+		
 			info['fileURL'] = partElems[0].get("key")
 			mediaElem = partElems[0].getparent()
 			mediaElemAttribs = mediaElem.keys()
 			
-			for item in ['videoResolution', 'duration', 'bitrate', 'aspectRatio', 'audioCodec', 'videoCodec', 'container', 'videoFrameRate']:
-				if (item in mediaElemAttribs):
-					info[item] = mediaElem.get(item)
+			if ('videoResolution' in mediaElemAttribs):
+				for item in ['videoResolution', 'duration', 'bitrate', 'aspectRatio', 'audioCodec', 'videoCodec', 'container', 'videoFrameRate', 'height', 'width']:
+					if (item in mediaElemAttribs):
+						info[item] = mediaElem.get(item)
 			
-			break
-			
+				break
+			else:
+				Log("*** Got URL of part but no media info. Retrying.")
+				
 		else:
-			Log("Failed to get part for item %s" % file)
+			Log("*** Failed to get part for item %s" % filePath)
 			cnt = cnt + 1
 			
 	if delFromLib:
