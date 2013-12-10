@@ -3,6 +3,7 @@ import uuid
 import os
 import socket
 import shutil
+import datetime
 
 from HTTPBetterErrorProcessor import HTTPBetterErrorProcessor
 from urllib2 import HTTPError, URLError
@@ -536,6 +537,7 @@ class BufferItem(object):
 		if (len(item) == 0):
 		
 			item['id'] = str(uuid.uuid4())
+			item['dateAdded'] = datetime.datetime.utcnow()
 			item['currentStatus'] = 'ADDED'
 			
 			item['sources'] = []
@@ -735,6 +737,7 @@ class BufferItem(object):
 						source['status'] = 'FINISHED'
 						self.item['currentSource'] = None
 						self.item['currentStatus'] = 'FINISHED'
+						self.item['dateFinished'] = datetime.datetime.utcnow()
 					else:
 						self.stop()
 				

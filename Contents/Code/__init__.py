@@ -878,7 +878,7 @@ def TVSeasonMenu(mediainfo=None, season_url=None,item_name=None, path=[], parent
 			ep_num in mediainfo_meta.season_episodes
 		):
 			mediainfo_ep.summary = mediainfo_meta.season_episodes[ep_num]['summary']
-			mediainfo_ep.title = "Episode " + str(ep_num) + " - " + mediainfo_meta.season_episodes[ep_num]['title']
+			mediainfo_ep.title = mediainfo_meta.season_episodes[ep_num]['title']
 			if mediainfo_meta.season_episodes[ep_num]['poster']:
 				mediainfo_ep.poster = mediainfo_meta.season_episodes[ep_num]['poster']
 		else:
@@ -905,7 +905,7 @@ def TVSeasonMenu(mediainfo=None, season_url=None,item_name=None, path=[], parent
 						path=path,
 						parent_name=oc.title2,
 					),
-					title=indicator + mediainfo_ep.title,
+					title=indicator + mediainfo_ep.title_pretty_ep,
 					tagline=mediainfo_ep.title,
 					summary=mediainfo_ep.summary,
 					thumb=mediainfo_ep.poster,
@@ -924,7 +924,7 @@ def TVSeasonMenu(mediainfo=None, season_url=None,item_name=None, path=[], parent
 						path=path,
 						parent_name=oc.title2,
 					),
-					title=indicator + mediainfo_ep.title,
+					title=indicator + mediainfo_ep.title_pretty_ep,
 					tagline=mediainfo_ep.title,
 					summary=mediainfo_ep.summary,
 					thumb=mediainfo_ep.poster,
@@ -984,7 +984,7 @@ def TVSeasonActionMenu(mediainfo, path, parent_name=None):
 def TVSeasonActionBuffer():
 
 
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	oc.header = "Not Yet Implemented."
 	oc.message = ""
 	
@@ -1146,6 +1146,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 		)
 		
 	if len(providerURLs) == 0:
+		oc.no_cache = True
 		oc.header = "No Enabled Sources Found"
 		oc.message = ""
 	else:
@@ -1344,7 +1345,7 @@ def SourcesActionTrailerMenu(mediainfo, path):
 
 def SourcesActionWatch(item_name=None, items=None, action="watch"):
 
-	oc = ObjectContainer(title1="", title2="")
+	oc = ObjectContainer(no_cache=True, title1="", title2="")
 	
 	watched_favs = []
 	hist = load_watched_items()
@@ -1572,6 +1573,7 @@ def BufferMenu(parent_name=None, replace_parent=False):
 		'Stopped': 'The items below are currently stopped. They will not be buffered until manually resumed. Click on an item for options.',
 		'No Source': 'The items below have tried all the sources they know about and found none with a valid file. You can try again by clicking an item and selecting "Resume"',
 	}
+	
 	# Group items into Ready, Active, Stopped and No Source groups.
 	for itemKey in items:
 	
@@ -1587,6 +1589,13 @@ def BufferMenu(parent_name=None, replace_parent=False):
 		elif (item.isNoSource()):
 			itemsGroups['No Source'].append(itemKey)
 	
+	# Get Viewing history if we need an indicator.
+	need_indicator = need_watched_indicator('tv') or need_watched_indicator('movies')
+	hist = None
+	if (need_indicator):
+		hist = load_watched_items()
+		
+	itemsGroups['Ready'] = sorted(itemsGroups['Ready'], key=lambda itemKey: buffer.adtlInfo(itemKey)['mediainfo'].title_sortable)
 	
 	for groupKey in ['Ready', 'Active', 'Queued', 'Stopped', 'No Source']:
 	
@@ -1613,8 +1622,17 @@ def BufferMenu(parent_name=None, replace_parent=False):
 					if ('path' in adtlInfo):
 						path = adtlInfo['path']
 				
-				title = mediainfo.title
-				
+				if (hist is not None):
+					watched = hist.has_been_watched(itemKey)
+					indicator = '    ' if (watched) else u"\u00F8" + "  "
+			
+				if (mediainfo.type == 'tv'):
+					title = "%s - %s.%s - %s" % (mediainfo.show_name, mediainfo.season, mediainfo.ep_num, mediainfo.title)
+				else:
+					title = mediainfo.title
+					
+				title = indicator + title
+
 				if (groupKey == 'Active'):
 					# Show basic stats...
 					stats = buffer.stats(itemKey)
@@ -1845,7 +1863,7 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 
 def BufferStartMenu(url, mediainfo, path):
 
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	buffer = BufferManager.instance()
 	providers = []
 	
@@ -1900,7 +1918,7 @@ def BufferStartMenu(url, mediainfo, path):
 
 def BufferResumeMenu(url):
 
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	
 	BufferManager.instance().resume(url)
 	oc.header = "Pre-Buffering resumed for this item."
@@ -1912,7 +1930,7 @@ def BufferResumeMenu(url):
 
 def BufferStopMenu(url):
 
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	
 	if (BufferManager.instance().stop(url)):
 		oc.header = "Pre-Buffering paused for this item."
@@ -1927,7 +1945,7 @@ def BufferStopMenu(url):
 
 def BufferMoveToLibMenu(url):
 
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	oc.header = "Not Yet Implemented."
 	oc.message = ""
 	
@@ -1940,7 +1958,7 @@ def BufferDelMenu(url):
 
 	BufferManager.instance().remove(url)
 	
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	oc.header = "Pre-Buffered item deleted"
 	oc.message = ""
 	
@@ -1952,7 +1970,7 @@ def BufferStopAndDelMenu(url):
 
 	BufferManager.instance().stopAndRemove(url)
 	
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	oc.header = "Pre-Buffered item deleted"
 	oc.message = ""
 	
@@ -1962,11 +1980,11 @@ def BufferStopAndDelMenu(url):
 
 def BufferNextSourceMenu(url):
 
-	oc = ObjectContainer()
+	oc = ObjectContainer(no_cache=True)
 	
 	if (BufferManager.instance().nextSource(url)):
 		oc.header = "Switching to new pre-buffering source."
-		oc.message = ""
+		oc.message = "It may take a little while for the download to resume whilst a new source is found."
 	else:
 		oc.header = "Source Switch Failed"
 		oc.message = "Thread failed to pickup source switch event within allocated time.\nYou may need to wait a little while for thread to pickup signal."
@@ -2141,7 +2159,7 @@ def HistoryMenu(parent_name=None):
 					poster = mediainfo.season_poster
 				
 			if (Prefs['watched_grouping'] == 'Episode'):
-				title = title + ' - ' + str(mediainfo.title)
+				title = title + ' - ' + str(mediainfo.title_pretty_ep)
 				poster = mediainfo.poster
 				summary = mediainfo.summary
 				
@@ -2392,7 +2410,7 @@ def HistoryAddToFavouritesMenu(mediainfo, path, parent_name):
 		return FavouritesLabelsItemMenu(mediainfo, parent_name)
 	else:	
 		# Otherwise, just show them a message.
-		oc = ObjectContainer(title1=parent_name, title2=L("HistoryAddToFavourites"))
+		oc = ObjectContainer(no_cache=True, title1=parent_name, title2=L("HistoryAddToFavourites"))
 		oc.header = L("HistoryFavouriteAddedTitle")
 		oc.message = str(L("HistoryFavouriteAddedMsg")) % path[-1]['elem']
 		
@@ -2818,7 +2836,7 @@ def FavouritesRemoveItemMenu(mediainfo):
 
 def FavouritesNotifyMenu(mediainfo=None):
 
-	oc = ObjectContainer(title1="", title2="")
+	oc = ObjectContainer(no_cache=True, title1="", title2="")
 	oc.header = "New Item Notification"
 	
 	cron_op = None

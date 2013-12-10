@@ -207,7 +207,7 @@ class TVDBProvider(object):
 				else:
 					episode = show[season][int(kwargs['ep_num'])]
 					
-					mediaInfo.title = "Episode " + episode['episodenumber'] + " - " + episode['episodename']
+					mediaInfo.title = episode['episodename']
 					mediaInfo.summary = episode['overview']
 					if episode['firstaired']:
 						mediaInfo.releasedate = Datetime.ParseDate(episode['firstaired'])
@@ -249,7 +249,34 @@ class MediaInfo(object):
 		self.show_name = show_name
 		self.season = season
 		self.ep_num = ep_num
-
+		
+	@property
+	def title_pretty_ep(self):
+	
+		if (self.ep_num):
+			re_res = re.search('Episode \d* - (.*)', self.title)
+			if re_res:
+				return self.title
+			else:
+				return ("Episode %s - %s" % (self.ep_num, self.title))
+		else:
+			return self.title
+			
+	@property
+	def title_sortable(self):
+	
+		ret = []
+		if self.show_name:
+			ret.append(self.show_name)
+			
+			if self.season:
+				ret.append("%05d" % self.season)
+			if self.ep_num:
+				ret.append("%05d" % self.ep_num)
+		
+		ret.append(self.title)
+		
+		return '.'.join(ret)
 		
 	def __str__(self):
 	
