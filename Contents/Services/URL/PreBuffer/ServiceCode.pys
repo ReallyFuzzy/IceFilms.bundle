@@ -29,7 +29,7 @@ def MediaObjectsForURL(url):
 		mediaObject.bitrate = int(qs['bitrate'][0])
 		
 	if ('aspectRatio' in qs and len(qs['aspectRatio']) == 1):
-		mediaObject.aspect_ratio = float(qs['aspectRatio'][0])
+		mediaObject.aspect_ratio = str(qs['aspectRatio'][0])
 
 	if ('videoResolution' in qs and len(qs['videoResolution']) == 1):
 		try:

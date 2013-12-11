@@ -55,6 +55,7 @@ SEARCH_ICON='icon-search.png'
 MOVIE_ICON='icon-movie.png'
 TV_ICON='icon-tv.png'
 STANDUP_ICON='icon-standup.png'
+FAVOURITES_ICON='Favorite.png'
 
 BUFFER_ICON='icon-buffer.png'
 BUFFER_STATE_ICON='icon-buffer-%s.png'
@@ -164,6 +165,27 @@ def Start():
 
 def ValidatePrefs():
 
+	# User has asked to not remember last save location for pre-buffer items. Delete them.
+	if not Prefs['remember_move_loc']:
+	
+		if 'PREBUFFER_MOVE_LOC_TV' in Dict:
+			del Dict['PREBUFFER_MOVE_LOC_TV'] 
+	
+		if 'PREBUFFER_MOVE_LOC_MOVIE' in Dict:
+			del Dict['PREBUFFER_MOVE_LOC_MOVIE']
+		
+	# User has asked to no longer automatically copy items to lib. Delete saved locations.
+	if not Prefs['move_finished_to_library']:
+	
+		if 'PREBUFFER_AUTO_LOC_TV' in Dict:
+			del Dict['PREBUFFER_AUTO_LOC_TV'] 
+		if 'PREBUFFER_AUTO_LOC_MOVIE' in Dict:
+			del Dict['PREBUFFER_AUTO_LOC_MOVIE']
+			
+	else:
+	
+		Dict['PREBUFFER_AUTO_LOC_SELECT'] = True
+		
 	if (Prefs['favourite_notify_email']):
 		# Enable cron if we have favourites which are already being checked.
 		if (len([x for x in load_favourite_items().get() if x.new_item_check]) > 0):
@@ -176,7 +198,10 @@ def ValidatePrefs():
 
 def VideoMainMenu():
 
-	oc = ObjectContainer(no_cache=True, title1=L("Video Channels"), title2=NAME, view_group="InfoList")
+	oc = ObjectContainer(no_cache=True, title1=L("Video Channels"), title2=NAME, view_group="List")
+	
+	if 'PREBUFFER_AUTO_LOC_SELECT' in Dict:
+		return BufferAutoSaveLocSelect()
 	
 	# Get latest version number of plugin.
 	try:
@@ -248,7 +273,7 @@ def VideoMainMenu():
 			title=title,
 			tagline=L("FavouritesSubtitle"),
 			summary=L("FavouritesSummary"),
-			thumb=R("Favorite.png"),
+			thumb=R(FAVOURITES_ICON),
 		)
 	)
 	
@@ -1685,7 +1710,7 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 				)
 
 			oc.add(
-				DirectoryObject(
+				PopupDirectoryObject(
 					key=Callback(BufferMoveToLibMenu, url=url),
 					title="Move Item to Library",
 				)
@@ -1946,11 +1971,125 @@ def BufferStopMenu(url):
 def BufferMoveToLibMenu(url):
 
 	oc = ObjectContainer(no_cache=True)
-	oc.header = "Not Yet Implemented."
-	oc.message = ""
 	
+	# Get the media info for the given URL. This will give us the item type.
+	buffer = BufferManager.instance()
+	adtlInfo = buffer.adtlInfo(url)
+	mediaInfo = adtlInfo['mediainfo']
+	
+	if (mediaInfo.type == 'tv'):
+		key = "PREBUFFER_MOVE_LOC_TV"
+	else:
+		key = "PREBUFFER_MOVE_LOC_MOVIE"
+			
+	# Get list of libraries.
+	libs = Buffer.getLibraryList(mediaInfo.type)
+		
+	if Prefs['remember_move_loc']:
+		
+		matchingLibs = [lib for lib in libs if Dict[key] in lib['locations']]
+		# Does the previously saved path exist in a library suitable for the item's media type?
+		if (
+			key in Dict and 
+			Dict[key] and	
+			len(matchingLibs) > 0
+		):
+		
+			# Move item to it.
+			Log("*** Moving item.")
+			try: 
+				buffer.moveAndRemove(url, Dict[key])
+				oc.header="Pre-Buffer item moved"
+				oc.message="Item moved to Plex library: %s, path: %s" % (matchingLibs[0]['name'], Dict[key])
+			except:
+				Log.Exception("*** Failed to move file.")
+				oc.header="Failed to move Pre-Buffer item."
+				oc.message="Item couldn't be moved to path: %s. Check it exists and PMS has access to it. " % Dict[key]
+			
+			return oc
+	
+	# User wants to select folder each time, library name hasn't been set or library / path 
+	# is no longer valid...
+	# Not to worry. Check if we have at least one library of the right type.
+	if len(libs) == 0:
+	
+		# No libs of right type! Get user to create one.
+		Log("*** No valid libraries found of type %s" % mediaInfo.type)
+		oc.header="No libraries found"
+		oc.message="No library of type '%s' found in Plex. Please create one before trying to move item." % mediaInfo.type
+		return oc
+		
+	elif (len(libs) == 1 and len(libs[0]['locations']) == 1):
+	
+		# Move item to it.
+		Log("*** Moving item.")
+		try:
+			buffer.moveAndRemove(url, libs[0]['locations'][0])
+			oc.header="Pre-Buffer item moved"
+			oc.message="Item moved to Plex library: %s, path: %s" % (libs[0]['name'], libs[0]['locations'][0])
+		except:
+			Log.Exception("*** Failed to move file.")
+			oc.header="Failed to move Pre-Buffer item."
+			oc.message="Item couldn't be moved to path: %s. Check it exists and PMS has access to it. " % libs[0]['locations'][0]
+			
+		return oc
+					
+	else:
+		
+		oc.title2="Please select library to move to."
+		oc.no_history=True
+		oc.replace_parent=True
+		oc.no_cache=True
+		
+		# We have multiple libs or locations or both. Let user select which one to use.
+		for lib in libs:
+			for loc in lib['locations']:
+		
+				summary = "Item will be moved to the folder %s and will appear in the %s Plex library." % (loc, lib['name'])
+		
+				if (Prefs['remember_move_loc']):
+					summary = summary + "\nAll subsequent moves will automatically go to this folder / library. This can be changed in the plugin's preferences." 
+			
+				oc.add(
+					DirectoryObject(
+						key=Callback(BufferMoveToLibSelectMenu, url=url, location=loc, key=key),
+						title="%s - %s" % (lib['name'], loc),
+						summary=summary,
+						thumb=R(BUFFER_ICON)
+					)
+				)
+	
+		
 	return oc
 
+####################################################################################################
+
+def BufferMoveToLibSelectMenu(url, location, key):
+
+	oc = ObjectContainer(no_cache=True)
+	
+	# Store library name / id into preference.
+	if Prefs['remember_move_loc']:
+		Dict[key] = location
+	
+	try:
+		BufferManager.instance().moveAndRemove(url, location)
+		
+		# Success!
+		oc = BufferMenu(replace_parent=True)
+		oc.no_cache = True
+		oc.header="Pre-Buffer item moved"
+		oc.message="Item moved to Library and path: %s, %s " % (id, location)
+			
+	except:
+		# Failure.
+		Log.Exception("*** Failed to move file.")	
+		oc.header="Failed to move Pre-Buffer item."
+		oc.message="Item couldn't be moved to path: %s. Check it exists and PMS has access to it. " % location
+		
+	return oc
+		
+	
 
 ####################################################################################################
 
@@ -1960,7 +2099,7 @@ def BufferDelMenu(url):
 	
 	oc = ObjectContainer(no_cache=True)
 	oc.header = "Pre-Buffered item deleted"
-	oc.message = ""
+	oc.message = "The selected pre-buffer item and related data has been deleted."
 	
 	return oc
 	
@@ -2098,6 +2237,108 @@ def BufferStatsMenu(mediainfo, parent_name, url, replace_parent=False):
 
 ####################################################################################################
 
+def BufferAutoSaveLocSelect():
+
+	oc = ObjectContainer(no_cache=True, view_group="List")
+	
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferAutoMoveLibMenu, type="movies"),
+			title="Pick Library / Location for Movies",
+			summary="Pick the Library / Location pre-buffered movies will be moved to when complete.",
+			thumb=R(BUFFER_ICON)
+		)
+	)
+	
+	oc.add(
+		DirectoryObject(
+			key=Callback(BufferAutoMoveLibMenu, type="tv"),
+			title="Pick Library / Location for TV Shows",
+			summary="Pick the Library / Location pre-buffered movies will be moved to when complete.",
+			thumb=R(BUFFER_ICON),
+		)
+	)
+	
+	return oc
+	
+####################################################################################################
+
+def BufferAutoMoveLibMenu(type):
+
+	oc = ObjectContainer(no_cache=True)
+	
+	# Get the media info for the given URL. This will give us the item type.
+	buffer = BufferManager.instance()
+
+	# Get list of libraries.
+	libs = Buffer.getLibraryList(type)
+		
+	# User wants to select folder each time, library name hasn't been set or library / path 
+	# is no longer valid...
+	# Not to worry. Check if we have at least one library of the right type.
+	if len(libs) == 0:
+	
+		# No libs of right type! Get user to create one.
+		Log("*** No valid libraries found of type %s" % mediaInfo.type)
+		oc.header="No libraries found"
+		oc.message="No library of type '%s' found in Plex. Please create one. Automoving of items will now be disabled." % mediaInfo.type
+		
+		Prefs['move_finished_to_library'] = False
+	
+		if 'PREBUFFER_AUTO_LOC_TV' in Dict:
+			del Dict['PREBUFFER_AUTO_LOC_TV'] 
+		if 'PREBUFFER_AUTO_LOC_MOVIE' in Dict:
+			del Dict['PREBUFFER_AUTO_LOC_MOVIE']
+		
+		return oc
+		
+	else:
+		
+		oc.title2="Please select library to move to."
+		
+		# We have multiple libs or locations or both. Let user select which one to use.
+		for lib in libs:
+			for loc in lib['locations']:
+		
+				summary = "Once a pre-buffered item is ready, it will be moved to the folder %s and will appear in the %s Plex library." % (loc, lib['name'])
+				
+				oc.add(
+					DirectoryObject(
+						key=Callback(BufferAutoMoveLibSelectMenu, type=type, path=loc),
+						title="%s - %s" % (lib['name'], loc),
+						summary=summary,
+						thumb=R(BUFFER_ICON)
+					)
+				)
+				
+	return oc
+
+####################################################################################################
+
+def BufferAutoMoveLibSelectMenu(type, path):
+
+	key = 'PREBUFFER_AUTO_LOC_MOVIE'
+	if type == 'tv':
+		key = 'PREBUFFER_AUTO_LOC_TV'
+		
+	Dict[key] = path
+	
+	
+	oc = ObjectContainer(no_cache=True)
+	oc.header = "Path set"
+	oc.message = "New Pre-buffer items of type %s will be automatically moved to %s when finished." % (type, path)
+	
+	if (
+		'PREBUFFER_AUTO_LOC_MOVIE' in Dict and
+		'PREBUFFER_AUTO_LOC_TV' in Dict and
+		'PREBUFFER_AUTO_LOC_SELECT' in Dict
+	):
+		del Dict['PREBUFFER_AUTO_LOC_SELECT']
+		
+	return oc
+	
+####################################################################################################
+
 def BufferPlayClean():
 
 	clients = DictDefault("BUFFER_CLIENT_PLAY", {})
@@ -2164,7 +2405,7 @@ def HistoryMenu(parent_name=None):
 				summary = mediainfo.summary
 				
 		else:
-			title = str(mediainfo.title)
+			title = mediainfo.title
 			summary = mediainfo.summary
 			
 		oc.add(
@@ -2453,7 +2694,7 @@ def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_par
 				label=label,
 			),
 			title=L("FavouritesActionTitle"),
-			thumb="",
+			thumb=R(FAVOURITES_ICON),
 		)
 	)
 		
@@ -2504,7 +2745,7 @@ def FavouritesMenu(parent_name=None,label=None, new_items_only=None, replace_par
 			mediainfo = item.mediainfo
 			navpath = item.path
 			
-			title = str(mediainfo.title)
+			title = mediainfo.title
 			if (item.new_item):
 				title =  u"\u00F8" + "  " + title
 			else:
@@ -2732,7 +2973,7 @@ def FavouritesLabelsItemMenu(mediainfo, parent_name, replace_parent=False):
 	# Load up Favourites.
 	favs = load_favourite_items() 
 		
-	oc = ObjectContainer(no_cache=True, replace_parent=replace_parent, title1=parent_name, title2="Labels for " + str(mediainfo.title))
+	oc = ObjectContainer(no_cache=True, replace_parent=replace_parent, title1=parent_name, title2="Labels for " + mediainfo.title)
 	
 	oc.add(
 		InputDirectoryObject(
@@ -2992,7 +3233,7 @@ def CheckForNewItemsInFavourite(favourite, force=False):
 		# of whether any new eps are still available because the user has watched one).
 		try:
 			if (has_new_items and Prefs['favourite_notify_email'] and not force):
-				Log('Notifying about new item for title: ' + str(favourite.mediainfo.title))
+				Log('Notifying about new item for title: ' + favourite.mediainfo.title)
 				Notifier.notify(
 					Prefs['favourite_notify_email'],
 					str(NAME),
@@ -3000,7 +3241,7 @@ def CheckForNewItemsInFavourite(favourite, force=False):
 					favourite.mediainfo.poster
 				)
 		except Exception, ex:
-			Log.Exception("ERROR Whilst sending email notification about " + str(favourite.mediainfo.title))
+			Log.Exception("ERROR Whilst sending email notification about " + favourite.mediainfo.title)
 			pass
 			
 			
@@ -3241,7 +3482,7 @@ def BufferPlayback(url, partIndex):
 	
 	# Add it to a Plex library and return Plex's internal URL for the item.
 	retInfo = {
-		'fileURL': Buffer.plexInfoForFile(path, "PreBuffer Play")['fileURL'],
+		'fileURL': Buffer.plexPathForFile(path, "PreBuffer Play")['fileURL'],
 		'filePath': path
 	}
 	

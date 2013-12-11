@@ -1,9 +1,9 @@
 [
     {
         "id": "sep-watched",
-        "type": "enum",
+        "type": "bool",
         "label": "-------- Watched Item Tracking: --------",
-        "values": [" -","-"],
+        "default": false,
     },
     {
         "id": "watched_amount",
@@ -28,9 +28,9 @@
     },
     {
         "id": "sep-favs",
-        "type": "enum",
+        "type": "bool",
         "label": "--------- Favourites: --------",
-        "values": [" -","-"],
+        "default": false,
     },
     {
         "id": "favourite_sort",
@@ -59,9 +59,9 @@
     },
     {
         "id": "sep-metadata",
-        "type": "enum",
+        "type": "bool",
         "label": "--------- Meta Data: --------",
-        "values": [" -","-"],
+        "default": false,
     },
     {
         "id": "meta_retrieve",
@@ -72,14 +72,20 @@
     },
     {
         "id": "sep-buffer",
-        "type": "enum",
+        "type": "bool",
         "label": "--------- Pre-Buffering: --------",
-        "values": [" -","-"],
+        "default": false,
+    },
+    {
+        "id": "remember_move_loc",
+        "type": "bool",
+        "label": "Remember last library / folder used when moving items:",
+        "default": "true"
     },
     {
         "id": "move_finished_to_library",
         "type": "bool",
-        "label": "Automatically move finished items to Plex library:",
+        "label": "Move finished items to Plex library:",
         "default": "false"
     },
     {
@@ -91,9 +97,9 @@
     },
     {
         "id": "sep-other",
-        "type": "enum",
+        "type": "bool",
         "label": "--------- Other: --------",
-        "values": [" -","-"],
+        "default": false,
     },
     {
         "id": "versiontracking",
@@ -103,9 +109,9 @@
     },
     {
         "id": "sep-sources",
-        "type": "enum",
+        "type": "bool",
         "label": "--------- Sources: --------",
-        "values": [" -","-"],
+        "default": false,
     },
     {
         "id": "show_unsupported",

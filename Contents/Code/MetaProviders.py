@@ -1,6 +1,7 @@
 import random
 import time
 import re
+import unicodedata
 
 from datetime import datetime
 from urllib import quote_plus
@@ -277,6 +278,41 @@ class MediaInfo(object):
 		ret.append(self.title)
 		
 		return '.'.join(ret)
+		
+	@property
+	def file_name(self):
+	
+		ret = []
+		
+		if self.show_name:
+		
+			ret.append(self.show_name)
+			
+			if self.season and self.ep_num:
+				ret.append("S%02dE%02d" % (self.season, self.ep_num))
+			elif self.season:
+				ret.append("S%02dE%02d" % (self.season, 0))
+			elif self.ep_num:
+				ret.append("S%02dE%02d" % (0, self.ep_num))
+			else:
+				ret.append("S%02dE%02d" % (0, 0))
+				
+		ret.append(self.title)
+		Log(self)
+		if self.type == 'movies' and self.year:
+			ret.append("(%s)" % self.year)
+		
+		value = ' - '.join(ret)
+		
+		if isinstance(value, unicode):
+			value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore')
+			
+		value = unicode(re.sub('[^\w\s-]', '', value).strip().lower())
+		value = unicode(re.sub('[-\s]+', '-', value))
+		
+		Log("*** Generated a file name of %s" % value)
+		
+		return value
 		
 	def __str__(self):
 	

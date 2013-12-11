@@ -172,6 +172,50 @@ class BufferManager(object):
 		self.stop(url)
 		self.remove(url)
 	
+	def moveAndRemove(self, url, path):
+		
+		adtlInfo = self.adtlInfo(url)
+		mediaInfo = adtlInfo['mediainfo']
+		allOk = True
+		item = self.item(url)
+		
+		sources = [source for source in item['sources'] if source['status'] == 'FINISHED']
+			
+		if len(sources) == 0:
+			return False
+			
+		parts = sources[0]['parts']
+		cnt = 1	
+		for part in parts:
+				
+			src = part['file']
+			
+			fileName = mediaInfo.file_name
+			
+			if len(parts) > 1:
+				fileName = "%s - part %s" % (fileName, cnt)
+				
+			# Add a file extension...
+			if ('info' in part and 'container' in part['info'] and part['info']['container']):
+				fileName = "%s.%s" % (fileName, part['info']['container'].lower())
+			else:
+				# Give file dummy extension so that Plex picks it up.
+				fileName = "%s.%s" % (fileName, 'mov')
+			
+			# Come up with a pretty file name.
+			dest = os.path.join(path, fileName)
+		
+			Log("*** Moving %s to %s" % (src, dest))
+			shutil.move(src, dest)
+			
+			cnt = cnt + 1
+			
+		Log("*** Removing pre-buffer item after succesful file move.")
+		self.remove(url)
+		pass
+		
+		return
+		
 	def nextSource(self, url):
 	
 		itemId = self.item(url)['id']
@@ -380,6 +424,7 @@ class BufferManager(object):
 				if (itemToDownload):
 					Log('XXX THREAD XXX: Allowed up to %s concurrent downloads.' % Prefs['max_concurrent_buffers'])
 					semaphore = Thread.Semaphore(BufferManager.DOWNLOAD_KEY, int(Prefs['max_concurrent_buffers']))
+					
 					if (semaphore.acquire(False)):
 					
 						# Try to launch keep alive thread.
@@ -388,14 +433,18 @@ class BufferManager(object):
 							Thread.Create(self.keepAlive, url=keepAliveUrl)
 
 						Log('XXX THREAD XXX: Launching download thread....')
-						Thread.Create(self.download, item=itemToDownload, savePath=savePath)
+						Thread.Create(self.download, itemKey=itemKey, savePath=savePath)
 						Thread.Sleep(5)
+						
 					else:
+					
 						# Looks like the queue is currently full.
 						# Wait X seconds before trying again.
 						Log('XXX THREAD XXX: Download queue is full. Sleeping.')
 						Thread.Sleep(15)
+						
 				else:
+				
 					# We don't currently have any items to download.
 					# Check again in X seconds.
 					Log('XXX THREAD XXX: No more items to download. Sleeping.')
@@ -407,9 +456,11 @@ class BufferManager(object):
 			semaphore.release()
 			
 			
-	def download(self, item, savePath):
+	def download(self, itemKey, savePath):
 	
 		try:
+			item = self.bufferItem(itemKey)
+			
 			Log('*** Starting download for item: %s ' % item)
 			Thread.Unblock('DOWNLOAD_OK_%s' % item.id())
 			Thread.Unblock('CURRENT_SOURCE_OK_%s' % item.id())
@@ -427,6 +478,21 @@ class BufferManager(object):
 			Log('*** Ending download for item: %s' % item)
 			# Release our download slot.
 			Thread.Semaphore(BufferManager.DOWNLOAD_KEY).release()
+			
+		Log("*** Working out whether to move item on completion.")
+		if Prefs['move_finished_to_library'] and item.isFinished():
+		
+			Log("*** Item is good to be moved.")
+			
+			key = 'PREBUFFER_AUTO_LOC_MOVIE'
+			if self.adtlInfo(itemKey)['mediainfo'].type == 'tv':
+				key = 'PREBUFFER_AUTO_LOC_TV'
+			
+			if key in Dict and Dict[key]:
+			
+				Log("*** Moving and removing item to %s" % Dict[key])
+				self.moveAndRemove(itemKey, Dict[key])
+
 	
 	'''
 		Periodically save the Dict so that stats are more or less up-to-date should something
@@ -723,9 +789,7 @@ class BufferItem(object):
 			
 							# Store media info about file so that plugin can 
 							# generate sane-ish media items.
-							part['info'] = plexInfoForFile(
-								part['file'], "PreBuffer Stats", delFromLib=True
-							)
+							part['info'] = plexAnalyseFile(part['file'], "PreBuffer Stats")
 							#Log(part['info'])
 							
 						else:
@@ -952,15 +1016,16 @@ class BufferItem(object):
 		if os.path.isfile(part['file']):
 	
 			Log('*** Part file already exists. Checking if part complete.')
-	
+			
+			part['downloaded'] = os.path.getsize(part['file'])
+			
 			# If the source size equals the file size, then this part is finished.
-			# Move onto next part (if any)
-			if os.path.getsize(part['file']) == part['size']:
+			# Move onto next part (if any)
+			if part['downloaded'] == part['size']:
 				Log('*** Part downloaded size == to expected size. Skipping to next part')
 				return
 			else:
 				Log('*** Part is partial download. Trying to resume...')
-				part['downloaded'] = os.path.getsize(part['file'])
 				startByte = part['downloaded']
 			
 		else:
@@ -1361,21 +1426,52 @@ class BufferItem(object):
 	about the file so that it can be passed on to the PreBuffer URL service so that it
 	may return a fully populated media item, which in turns should give clients a much
 	better chance of working out whether they'll need to transcode.
+'''
+def plexAnalyseFile(filePath, libName):
 
-	This is also used when a user chooses to actually play a file to add the item to a
+	return plexQueryFile(
+		filePath=filePath,
+		libName=libName,
+		wantPath=False,
+		wantAnalysis=True,
+		delFromLib=True
+	)
+	
+'''
+	Given a file, add it to a Plex library, let Plex scan and it and then extract out
+	information about the file.
+	
+	This is used when a user chooses to actually play a file to add the item to a
 	library and retrieve the item's URL to play.
 '''
-def plexInfoForFile(filePath, libName, delFromLib=False):
-	
+def plexPathForFile(filePath, libName):
+
+	return plexQueryFile(
+		filePath=filePath,
+		libName=libName,
+		wantPath=True,
+		wantAnalysis=False,
+		delFromLib=False
+	)
+
+'''
+	Function that does the work of adding a file to a Plex lib and extracting info out.
+'''
+def plexQueryFile(filePath, libName, wantPath, wantAnalysis, delFromLib):
+
 	libURL = addPathToLib(filePath, libName)
 	
 	cnt = 0
 	info = {}
 	
-	while (cnt <= 5):
+	haveAllData = False
+	
+	while (cnt <= 10 and not haveAllData):
 
 		Thread.Sleep(2)
-	
+		haveAllData = True
+		cnt = cnt + 1
+		
 		# Get the play ID of the item and send that to client.
 		request = urllib2.Request("http://127.0.0.1:32400" + libURL + "/all")
 		response = urllib2.urlopen(request)
@@ -1387,22 +1483,25 @@ def plexInfoForFile(filePath, libName, delFromLib=False):
 		
 		if (len(partElems) > 0):
 		
-			info['fileURL'] = partElems[0].get("key")
-			mediaElem = partElems[0].getparent()
-			mediaElemAttribs = mediaElem.keys()
+			if wantPath:
+				info['fileURL'] = partElems[0].get("key")
+				
+			if wantAnalysis:
+				mediaElem = partElems[0].getparent()
+				mediaElemAttribs = mediaElem.keys()
 			
-			if ('videoResolution' in mediaElemAttribs):
-				for item in ['videoResolution', 'duration', 'bitrate', 'aspectRatio', 'audioCodec', 'videoCodec', 'container', 'videoFrameRate', 'height', 'width']:
-					if (item in mediaElemAttribs):
-						info[item] = mediaElem.get(item)
-			
-				break
-			else:
-				Log("*** Got URL of part but no media info. Retrying.")
+				if ('videoResolution' in mediaElemAttribs):
+					for item in ['videoResolution', 'duration', 'bitrate', 'aspectRatio', 'audioCodec', 'videoCodec', 'container', 'videoFrameRate', 'height', 'width']:
+						if (item in mediaElemAttribs):
+							info[item] = mediaElem.get(item)
+				
+				else:
+					Log("*** Got URL of part but no media info. Retrying.")
+					haveAllData = False
 				
 		else:
-			Log("*** Failed to get part for item %s" % filePath)
-			cnt = cnt + 1
+			Log("*** Failed to get part for item %s. Retrying." % filePath)
+			haveAllData = False
 			
 	if delFromLib:
 		delPathFromLib(filePath, libName)
@@ -1564,3 +1663,36 @@ def delPathFromLib(filePath, libName):
 		semaphore.release()
 		
 	return ""
+	
+def getLibraryList(type):
+
+	libs = []
+	
+	if (type == 'tv'):
+		dirType = 'show'
+	else:
+		dirType = 'movie'
+
+	request = urllib2.Request("http://127.0.0.1:32400/library/sections/")
+	response = urllib2.urlopen(request)
+		
+	content = response.read()
+	elem = XML.ElementFromString(content)
+	dirElems = elem.xpath("//Directory[@type='%s']" % dirType)
+	
+	for dirElem in dirElems:
+	
+		# Look for each path in dir.
+		locs = [loc.get("path") for loc in dirElem.xpath("./Location")]
+		
+		libs.append(
+			{
+				'name': dirElem.get("title"),
+				'id': dirElem.get("key"),
+				'locations': locs,
+			}
+		)
+		
+	Log('*** Found the following %s libraries: %s' % (type, libs))
+	
+	return libs

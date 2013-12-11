@@ -139,7 +139,7 @@ def MediaObjectsForURL(url):
 
 		mark_played = True		
 		if ('markPlayed' in provider_url_qs):
-			mark_played = int(provider_url_qs['markPlayed']) > 0
+			mark_played = int(provider_url_qs['markPlayed'][0]) > 0
 			
 		# Delay working out the real provider's URL until video is picked.
 		# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id?params
