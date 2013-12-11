@@ -134,10 +134,10 @@ def MediaObjectsForURL(url):
 		
 	else:
 	
-		provider_url_parts = urlparse.urlparse(url)
+		provider_url_parts = urlparse.urlparse(url.replace("external://","http://"))
 		provider_url_qs = cgi.parse_qs(provider_url_parts.query)
 
-		mark_played = True		
+		mark_played = True
 		if ('markPlayed' in provider_url_qs):
 			mark_played = int(provider_url_qs['markPlayed'][0]) > 0
 			
