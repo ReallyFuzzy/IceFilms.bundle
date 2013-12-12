@@ -557,6 +557,9 @@ def ItemsMenu(
 
 	Dict[LAST_USAGE_TIME_KEY] = datetime.utcnow()
 	
+	# We may have gotten here after client stopped playing a pre-buffered item. Clean up time...
+	BufferPlayClean()
+	
 	num_pages = 2
 	replace_parent = False
 	title2 = section_name
@@ -1062,7 +1065,7 @@ def SourcesOrBufferMenu(mediainfo=None, url=None, item_name=None, path=[], paren
 		
 		# Store the fact that this client maybe ready to play this video.
 		# This will be used to cleanup the libraries we use.
-		DictDefault("BUFFER_CLIENT_PLAY", {})[Request.Headers['X-Plex-Client-Identifier']] = buffer.fileLoc(url, 0)
+		DictDefault("BUFFER_CLIENT_PLAY", {})[GetClientId()] = buffer.fileLoc(url, 0)
 		Dict.Save()
 		
 		if (part_count > 1):
@@ -1692,7 +1695,7 @@ def BufferActionMenu(url, mediainfo=None, path=None, parent_name=None, caller=No
 
 			# Store the fact that this client maybe ready to play this video.
 			# This will be used to cleanup the libraries we use.
-			DictDefault("BUFFER_CLIENT_PLAY",{})[Request.Headers['X-Plex-Client-Identifier']] = buffer.fileLoc(url, 0)
+			DictDefault("BUFFER_CLIENT_PLAY",{})[GetClientId()] = buffer.fileLoc(url, 0)
 			Dict.Save()
 			
 			for cnt in range(0, part_count):
@@ -2342,13 +2345,14 @@ def BufferAutoMoveLibSelectMenu(type, path):
 def BufferPlayClean():
 
 	clients = DictDefault("BUFFER_CLIENT_PLAY", {})
+	clientId = GetClientId()
 	Log("*** Current clients play list: %s" % clients)
 	
-	if (Request.Headers['X-Plex-Client-Identifier'] in clients):
+	if (clientId in clients):
 	
-		path = clients[Request.Headers['X-Plex-Client-Identifier']]
+		path = clients[clientId]
 		Log("*** Should be trying to remove %s from Pre-Play library" % path)
-		del clients[Request.Headers['X-Plex-Client-Identifier']]
+		del clients[clientId]
 		
 		# Remove path from library.
 		# FIXME: Need to check no-one else is also playing this item.
@@ -3674,6 +3678,22 @@ def CheckAdditionalSources(sources):
 			pass
 
 
+####################################################################################################
+'''
+	Try to return a unique ID for the current client.
+'''
+def GetClientId():
+	
+	if 'X-Plex-Client-Identifier' in Request.Headers:
+		return Request.Headers['X-Plex-Client-Identifier']
+	else:
+		ret = ""
+		for attr in ['Platform','Product','Version','Protocols']:
+			if hasattr(Client, attr):
+				ret = ret + str(getattr(Client, attr))
+	
+		return Hash.MD5(ret)
+			
 ###############################################################################
 # UTIL METHODS
 ###############################################################################
