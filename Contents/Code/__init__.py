@@ -1110,7 +1110,7 @@ def SourcesMenu(mediainfo=None, url=None, item_name=None, path=[], parent_name=N
 	
 	path = path + [ { 'elem': item_name, 'url': url } ]
 	
-	oc = ObjectContainer(no_cache=False, view_group="List", title1=parent_name, title2=item_name)
+	oc = ObjectContainer(no_cache=True, view_group="List", title1=parent_name, title2=item_name)
 	
 	# Get as much meta data as possible about this item.
 	mediainfo2 = Parsing.GetMediaInfo(url, mediainfo, need_meta_retrieve(mediainfo.type))
@@ -1427,41 +1427,80 @@ def SourcesActionWatch(item_name=None, items=None, action="watch"):
 	
 ####################################################################################################
 
-def CaptchaRequiredMenu(mediainfo, source_item, url, parent_name=None, replace_parent=False):
+def CaptchaRequiredMenu(mediainfo, source_item, url, nonce, parent_name=None, replace_parent=False):
 
-	# Cache required as some clients will re-request menu after looking at captcha image.
-	oc = ObjectContainer(no_cache=False, view_group="InfoList", user_agent=USER_AGENT, no_history=True, title1=parent_name, title2="Captcha", replace_parent=replace_parent)
+	oc = ObjectContainer(no_cache=True, view_group="InfoList", user_agent=USER_AGENT, no_history=True, title1=parent_name, title2="Captcha", replace_parent=replace_parent)
+	
+	# Have we already looked up this nonce?
+	# This can happen with certain clients (looking at you ios), where this menu will be
+	# re-requested after user looks at captcha.
+	if 'CAPTCHA_LOOKUPS' not in Dict:
+		Dict['CAPTCHA_LOOKUPS'] = []
 		
-	# Get the media sources for the passed in URL.
-	# This should be made up of two Media Objects:
-	#  1) URL of the CAPTCHA
-	#  2) New URL of the video to play
+	prevItem = [item for item in Dict['CAPTCHA_LOOKUPS'] if item['nonce'] == nonce]
 	
-	media_objects = URLService.MediaObjectsForURL(url)
+	if (len(prevItem) > 0):
+		captcha_img_URL = prevItem[0]['captchaImgURL']
+		captcha_img_headers = prevItem[0]['captchaImgHeaders']
+		solve_captcha_URL = prevItem[0]['captchaURL']	
+	else:
+		# Get the media sources for the passed in URL.
+		# This should be made up of two Media Objects:
+		#  1) URL of the CAPTCHA
+		#  2) New URL of the video to play
+		media_objects = URLService.MediaObjectsForURL(url)
 	
-	captcha_img_URL = media_objects[0].parts[0].key
-	solve_captcha_URL = media_objects[1].parts[0].key
-	
-	#Log("In captchaRequiredMenu, url: " + url + ", captcha_img_URL:" + captcha_img_URL + ", solve_captcha_URL: " + solve_captcha_URL)
+		captcha_img_URL = media_objects[0].parts[0].key
+		captcha_img_headers = {}
+		if (len(media_objects[0].parts) > 1):
+			captcha_img_headers = JSON.ObjectFromString(String.Decode(media_objects[0].parts[1].key))
+		
+		solve_captcha_URL = media_objects[1].parts[0].key
+		
+		Dict['CAPTCHA_LOOKUPS'].append({
+			'nonce': nonce, 'captchaImgURL': captcha_img_URL,
+			'captchaImgHeaders': captcha_img_headers, 'captchaURL': solve_captcha_URL
+		})
+		
+		while len(Dict['CAPTCHA_LOOKUPS']) > 10:
+			Dict['CAPTCHA_LOOKUPS'].pop(0)
+		
+	#Log("*** In captchaRequiredMenu - url: %s, captcha_img_URL: %s, captcha_img_headers: %s, solve_captcha_URL: %s" % (url, captcha_img_URL, captcha_img_headers, solve_captcha_URL))
 	
 	oc.add(
 		InputDirectoryObject(
-			key=Callback(CaptchaProcessMenu, mediainfo=mediainfo, source_item=source_item, url=url, solve_captcha_url=solve_captcha_URL, parent_name=oc.title1),
+			key=Callback(CaptchaProcessMenu, mediainfo=mediainfo, source_item=source_item, url=url, solve_captcha_url=solve_captcha_URL, parent_name=oc.title1, nonce=nonce),
 			title="Enter Captcha...",
 			prompt="Enter Captcha to view item.",
 			tagline="This provider requires that you solve this Captcha.",
 			summary="This provider requires that you solve this Captcha.",
-			thumb=PLUGIN_URL + "/proxy?" + urllib.urlencode({'url':captcha_img_URL}),
+			thumb=Callback(Proxy, url=captcha_img_URL, headers=captcha_img_headers, cache_time=3600),
 			art=mediainfo.background,
 		)
 	)
-	
+		
 	return oc
 
 ####################################################################################################
 
-def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, parent_name=None):
+def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, nonce, parent_name=None):
 
+	# Is this a re-request after the user has viewed the captcha?
+	item = [item for item in Dict['CAPTCHA_LOOKUPS'] if item['nonce'] == nonce]
+	if (len(item) == 1  and 'next_nonce' in item[0]):
+		# Yup. Just re-redirect client to the next captcha.
+		return Redirect(
+			Callback(
+				CaptchaRequiredMenu,
+				mediainfo=mediainfo,
+				source_item=source_item,
+				url=url,
+				parent_name=parent_name,
+				replace_parent=False,
+				nonce=item[0]['next_nonce']
+			)
+		)
+	
 	oc = ObjectContainer(
 			view_group="InfoList", user_agent=USER_AGENT, no_history=True, replace_parent=True,
 			title1=parent_name, title2="Succesful Captcha"
@@ -1478,9 +1517,29 @@ def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, pa
 	try:
 		video_media = URLService.MediaObjectsForURL(solve_captcha_url + "&" + urllib.urlencode({"captcha":query}))
 	except Exception, ex:
+		
 		# Something went wrong. Chances are the Captcha is wrong. Go back and load a new one.
 		# FIXME: Need tighter error checking.
-		return CaptchaRequiredMenu(mediainfo=mediainfo, source_item=source_item, url=url, parent_name=parent_name, replace_parent=True)
+		
+		# We're about to send the client to a new captcha page... Keep track of the new nonce
+		# so that if the client is one of those that will re-request this menu after the user
+		# views the captcha, we can re-direct them back to the same new captcha page without 
+		# trying to re-process the current captcha.
+		next_nonce = String.UUID()
+		if (len(item) >= 1):
+			item[0]['next_nonce'] = next_nonce
+				
+		return Redirect(
+			Callback(
+				CaptchaRequiredMenu,
+				mediainfo=mediainfo,
+				source_item=source_item,
+				url=url,
+				parent_name=parent_name,
+				replace_parent=True,
+				nonce=next_nonce
+			)
+		)
 			
 	video_url = video_media[0].parts[0].key
 	
@@ -1508,19 +1567,13 @@ def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, pa
 	
 	return oc
 	
-# Utility methods for captchas. All requests in the Captcha cycle must come from the same User-Agent
-# If just let the clients load the Captcha image, we get different User-Agents. Some us libcurl and
-# it'd be possible to force a specific user agent using the "url|extraparams" notation, however some
-# clients use the transcoder which does it's own separate thing and doesn't understand libcurl params.
-# So, instead, we rewrite the Captcha's image URL to pass through this, so we can forcibly set
-# the user-agent.
-#
-# Yup.... This is all rubbish.
-@route(VIDEO_PREFIX + '/proxy')
-def Proxy(url):
+# Utility methods for captchas which will "proxy" a request whilst honouring any headers
+# returned along with the Captcha URL by the Provider's URL service. This method is resolvable by
+# the client (i.e: we can return a Callback to this method to the client)
+def Proxy(url, headers, cache_time):
 
-	#Log(url)
-	return HTTP.Request(url,headers={'User-Agent':USER_AGENT}).content
+	#url = "http://c.s-microsoft.com/en-au/CMSImages/mslogo.png?version=856673f8-e6be-0476-6669-d5bf2300391d"
+	return HTTP.Request(url, headers=headers, cacheTime=cache_time).content
 	
 ####################################################################################################
 
@@ -3282,7 +3335,7 @@ def GetItemForSource(mediainfo, source_item, parent_name, part_index=None):
 			return {
 				'item':
 					DirectoryObject(
-						key = Callback(CaptchaRequiredMenu, mediainfo=mediainfo, source_item=source_item, url=media_item.url, parent_name=parent_name),
+						key = Callback(CaptchaRequiredMenu, mediainfo=mediainfo, source_item=source_item, url=media_item.url, parent_name=parent_name, nonce=String.UUID()),
 						title = media_item.title + " (Captcha)",
 						summary= mediainfo.summary,
 						art=mediainfo.background,

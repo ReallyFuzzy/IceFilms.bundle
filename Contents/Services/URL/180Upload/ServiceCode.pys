@@ -74,13 +74,15 @@ def MediaObjectsForURL(url):
 		
 		#Check for SolveMedia Captcha image
 		solvemedia = re.search('<iframe src="(http://api.solvemedia.com.+?)"', html)
+		captchaHeaders = {}
 		
 		if solvemedia:
-			html = HTTP.Request(solvemedia.group(1), cacheTime=0, headers={'User-Agent': USER_AGENT}).content
+			captchaHeaders['User-Agent'] = USER_AGENT
+			html = HTTP.Request(solvemedia.group(1), cacheTime=0, headers=captchaHeaders).content
 			data['adcopy_challenge']=re.search('id="adcopy_challenge" value="(.+?)">', html).group(1)
 			captchaURL = "http://api.solvemedia.com%s" % re.search('<img src="(.+?)"', html).group(1)
-        		
-		
+			captchaHeaders['Cookie'] = HTTP.CookiesForURL(solvemedia.group(1))
+			
 		# First, break down the URL into it's part
 		url_parts = urlparse.urlparse(url)
 		data_qs = urllib.urlencode(data)
@@ -88,14 +90,11 @@ def MediaObjectsForURL(url):
 		# Rebuild the URL with the data args we extracted above.
 		video_url = urlparse.ParseResult("solve", url_parts.netloc, url_parts.path, None, data_qs, None).geturl()	
 		
-		#Log(video_url)
-
 		return [
 			MediaObject(	
 				parts = [
-					PartObject(
-						key=captchaURL,
-					)
+					PartObject(key=captchaURL),
+					PartObject(key=String.Encode(JSON.StringFromObject(captchaHeaders))),
 				]
 			),
 			MediaObject(

@@ -15,7 +15,7 @@ from MetaProviders import DBProvider, MediaInfo
 
 ICEFILMS_URL = "http://www.icefilms.info"
 ICEFILMS_VIDEO_URL = ICEFILMS_URL + "/ip.php?v=%s"
-ICEFILMS_SOURCES_URL = ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.php?h=374&w=631&vid=%s&img="
+ICEFILMS_SOURCES_URL = ICEFILMS_URL + "/membersonly/components/com_iceplayer/video.php?h=374&w=631&vid=%s"
 ICEFILMS_AJAX = ICEFILMS_URL+'membersonly/components/com_iceplayer/video.phpAjaxResp.php'
 ICEFILMS_REFERRER = ICEFILMS_URL
 
@@ -161,7 +161,7 @@ def GetSources(url):
 	id = match = id_reg_ex.search(url).group(1)
 	
 	# Load up sources.
-	soup = BeautifulSoup(HTTP.Request(ICEFILMS_SOURCES_URL % id, cacheTime=0).content)
+	soup = BeautifulSoup(HTTP.Request(ICEFILMS_SOURCES_URL % id, cacheTime=300).content)
 	
 	for qualityElem in soup.findAll('div','ripdiv'):
 	
