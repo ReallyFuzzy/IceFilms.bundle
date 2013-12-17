@@ -300,12 +300,12 @@ def GetSearchResults(query=None,type=None,imdb_id=None, exact=False):
 	
 	if (type=="movies"):
 		# This a google search. The -tv will ommit all TV shows.
-		search = 'intitle:%s -"Episode List" -"Series Rating" site:%s' % (query,ICEFILMS_URL)
+		search = 'intitle:"%s" -"Episode List" -"Series Rating"' % (query)
 	else:
-		search = 'allintitle:%s "Episode List" site:%s' % (query, ICEFILMS_URL)
+		search = '"Episode List" intitle:"%s"' % (query)
 	
 	gs = GoogleSearch(search)
-	gs.results_per_page = 25
+	gs.results_per_page = 10
 	gs.page = 0
 	results = gs.get_results()
 	items = []
