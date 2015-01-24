@@ -6,6 +6,7 @@ import urlparse
 import copy
 import sys
 import base64
+import md5
 
 from datetime       import date, datetime, timedelta
 from dateutil       import tz
@@ -1246,7 +1247,7 @@ def CaptchaRequiredMenu(mediainfo, source_item, url, parent_name=None, replace_p
 			tagline="This provider requires that you solve this Captcha.",
 			summary="This provider requires that you solve this Captcha.",
 			thumb=PLUGIN_URL + "/proxy?" + urllib.urlencode({'url':captcha_img_URL}),
-			art=mediainfo.background,
+			art=PLUGIN_URL + "/proxy?" + urllib.urlencode({'url':captcha_img_URL}),
 		)
 	)
 	
@@ -1301,7 +1302,7 @@ def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, pa
 	return oc
 	
 # Utility methods for captchas. All requests in the Captcha cycle must come from the same User-Agent
-# If just let the clients load the Captcha image, we get different User-Agents. Some us libcurl and
+# If just let the clients load the Captcha image, we get different User-Agents. Some use libcurl and
 # it'd be possible to force a specific user agent using the "url|extraparams" notation, however some
 # clients use the transcoder which does it's own separate thing and doesn't understand libcurl params.
 # So, instead, we rewrite the Captcha's image URL to pass through this, so we can forcibly set
@@ -1312,8 +1313,26 @@ def CaptchaProcessMenu(query, mediainfo, source_item, url, solve_captcha_url, pa
 def Proxy(url):
 
 	#Log(url)
-	return HTTP.Request(url,headers={'User-Agent':USER_AGENT}).content
+	key = "CAPTCHA-" + md5.new(url).hexdigest()
+
+	#Log("WAITING " + key);
+	Thread.AcquireLock(key)
 	
+	try:
+		if (not Data.Exists(key)):
+			#Log("REQUESTING CAPTCHA")
+			captcha = HTTP.Request(url,headers={'User-Agent':USER_AGENT}, cacheTime=10).content
+			#Log("SAVING CAPTCHA")
+			Data.Save(key, captcha)
+			#Log("SLEEPING")
+			time.sleep(10)
+	except Exception, ex:
+		pass
+		
+	#Log("UNBLOCKING " + key);
+	Thread.ReleaseLock(key)
+
+	return Data.Load(key)
 	
 ####################################################################################################
 def SearchResultsMenu(query, type, parent_name=None):

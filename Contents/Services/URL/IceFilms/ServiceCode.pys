@@ -124,8 +124,6 @@ def MediaObjectsForURL(url):
 		browse_url = urllib.unquote_plus(qs['browse_url'][0])
 		final_url =  urllib.unquote_plus(qs['final_url'][0])
 		
-		# Delay working out the real provider's URL until video is picked.
-		# Passed in URL should be a made up URL of form /external/icefilm_item_id/part_id
 		return [
 			MediaObject(
 				parts = [PartObject(key=Callback(PlayCaptchaVideo, browse_url=browse_url, provider_url=final_url))],
@@ -143,20 +141,29 @@ def MediaObjectsForURL(url):
 		]
 
 @indirect
-def PlayVideo(url):
-
-	provider_url = GetSourceFromURL(url)
-	return PlayProviderVideo(url, provider_url)
-	
-@indirect
 def PlayCaptchaVideo(browse_url, provider_url):
 
-	return PlayProviderVideo(browse_url, provider_url)
+	#Log("IN PlayCaptchaVideo" + provider_url)
 	
+	PlaybackStarted(url=browse_url)
 	
-def PlayProviderVideo(browse_url, provider_url):
+	return ObjectContainer(
+		objects = [
+			VideoClipObject(
+				items = [
+					MediaObject(parts = [PartObject(key=provider_url)])
+				]
+			)
+		]
+	)
 
+@indirect
+def PlayVideo(url):
+	
+	provider_url = GetSourceFromURL(url)
 	media_objects = URLService.MediaObjectsForURL(provider_url)
+	
+	#Log(media_objects)
 	
 	# !!!Complete Hack Alert!!!
 	# Roku client doesn't handle multiple indirect directives.
@@ -179,7 +186,7 @@ def PlayProviderVideo(browse_url, provider_url):
 		media_objects[0].parts[0].key = response_obj.xpath("//Part/@key")[0]
 		
 	if (len(media_objects) > 0):
-		PlaybackStarted(url=browse_url)
+		PlaybackStarted(url=url)
 		
 	return ObjectContainer(
 		objects = [

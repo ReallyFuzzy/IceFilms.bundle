@@ -1,1 +1,177 @@
-import re, stringfrom BeautifulSoup import BeautifulSoupUSER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22'def NormalizeURL(url):	#Log("*********** In HugeFiles NormalizeURL")		# Deal with special providerInfo URL built up by IceFilms plugin to return	# info about this provider. For all other normal URLs, do nothing. 	if ("providerinfo" in url):			try:			show = Prefs["show_hugefiles"]		except Exception, ex:			show = True					if (show):			return url + "&visible=true"		else:			return url				else:		return url	def MetadataObjectForURL(url): 	#Log('In MetadataObjectForURL for HugeFiles (' + url + ')')		video = VideoClipObject(		title = 'HugeFiles Redirect Page',		summary = 'HugeFiles Redirect Page',		thumb = None,	)		return video	def MediaObjectsForURL(url):	Log("------------------------------------------------------------------------------")	Log("In MediaObjectsForURL for HugeFiles. (%s)" % url)		ret = []	ret.append(		MediaObject(			parts = [PartObject(key=Callback(PlayVideo, url=url))],		)	)	  	return ret@indirectdef PlayVideo(url):	# Request initial page...	#Log("------------------------------------------------------------------------------")	#Log("Requesting: " + url)		soup = BeautifulSoup(HTTP.Request(url).content)		#Log(str(soup))		# Deal with initial page.	# Extract out these form elements...	formElems = ['op', 'id', 'fname', 'method_free', 'referer', 'usr_login']	params = {}		for formElem in formElems:		formElemVal =  soup.find('input', {'name' : formElem })['value']		params[formElem] = formElemVal			# Submit form with extracted elements.	#Log("****************************************************************************")	#Log("Requesting: " + url)	#Log("Params: " + str(params))		soup = BeautifulSoup(HTTP.Request(url, values=params).content)		#Log(str(soup))		# Unpack player code and turn it into soup.	player_code = Unpack(str(soup.find('div',{ 'id': 'player_code' })))		if ('new SWFObject' in player_code):		final_url = re.search("\\\\'file\\\\',\\\\'([^\\\\]*)",player_code).group(1)	else:		soup = BeautifulSoup(re.search('(<.*>)', player_code).group(1))		final_url = soup.find('param',{'name': 'src'})['value']			Log("final url: " + final_url)		return ObjectContainer(		objects = [			VideoClipObject(				items = [					MediaObject(						parts = [PartObject(key=final_url)],					)				]			)		]	)  	return retdef LogProviderError(msg="", ex=None):	Log("************************** PROVIDER ERROR: " + msg)	raise Exception(msg)	return []	def Unpack(script):	if script is None:		return		#Log(script)	# Look for string to unpack.	val_to_unpack = re.search("return p}\('(.*)',\d*,\d*,'", script)			if (val_to_unpack is None or val_to_unpack.group(1) is None):		return None		# Look for substitution values.	sub_vals = re.search("\d{2},'([^']*)'.split", script)		if (sub_vals is None):		return None		val_to_unpack = val_to_unpack.group(1)	sub_vals = sub_vals.group(1).split('|')	#Log(val_to_unpack)	#Log(sub_vals)		# Create dict to map url sub keys to sub values.	alphadict = dict()	for index_cnt in range(0, 2):		index = index_cnt * len(string.digits + string.ascii_lowercase)		strindex = str(index_cnt) if index_cnt > 0 else ""		for cnt in range(0, len(string.digits + string.ascii_lowercase)):			alphadict[strindex + (string.digits + string.ascii_lowercase)[cnt]] = cnt + index		def SubElem(matchObj):		val = sub_vals[alphadict[matchObj.group(0)]]		if (val == ""):			val = matchObj.group(0)		return val	# Sub values into string to unpack	return re.sub("[0-9a-z]{1,2}", SubElem, val_to_unpack) 
+import re, string
+import urllib, urlparse, cgi
+
+from BeautifulSoup import BeautifulSoup
+
+USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22'
+
+def NormalizeURL(url):
+
+	#Log("*********** In HugeFiles NormalizeURL")
+	
+	# Deal with special providerInfo URL built up by IceFilms plugin to return
+	# info about this provider. For all other normal URLs, do nothing. 
+	if ("providerinfo" in url):
+	
+		try:
+			show = Prefs["show_hugefiles"]
+		except Exception, ex:
+			show = True
+			
+		if (show):
+			return url + "&visible=true&captcha=true"
+		else:
+			return url
+			
+	else:
+		return url
+	
+def MetadataObjectForURL(url):
+ 
+	#Log('In MetadataObjectForURL for HugeFiles (' + url + ')')
+	
+	video = VideoClipObject(
+		title = 'HugeFiles Redirect Page',
+		summary = 'HugeFiles Redirect Page',
+		thumb = None,
+	)
+	
+	return video
+	
+def MediaObjectsForURL(url):
+	
+	#Log(url)
+
+	# Somebody knows we're a complicated beast! They've asked us to return the url of the Captcha
+	# image as well as a URL to submit to get past the captcha.
+	if ("captcha://" in url):
+	
+		url = url.replace("captcha://", "http://")
+		
+		html = HTTP.Request(url, cacheTime=0, headers={'User-Agent':USER_AGENT}).content
+		soup = BeautifulSoup(html);
+		
+		data = {}
+		r = soup.findAll('input', { 'type': "hidden", 'name': re.compile(".+"), 'value': re.compile(".*") })
+		r = r + soup.findAll('input', { 'type': "submit" })
+		
+		if r:
+			for node in r:
+				#Log(node)
+				data[node['name']] = node['value']
+		else:
+			raise Exception('Unable to resolve Link')
+		
+		#Check for SolveMedia Captcha image
+		solvemedia = re.search('<iframe src="(http://api.solvemedia.com.+?)"', html)
+		
+		if solvemedia:
+			html = HTTP.Request(solvemedia.group(1), cacheTime=0, headers={'User-Agent': USER_AGENT}).content
+			data['adcopy_challenge']=re.search('id="adcopy_challenge" value="(.+?)">', html).group(1)
+			captchaURL = "http://api.solvemedia.com%s" % re.search('<img src="(.+?)"', html).group(1)
+        		
+		
+		# First, break down the URL into it's part
+		url_parts = urlparse.urlparse(url)
+		data_qs = urllib.urlencode(data)
+		
+		# Rebuild the URL with the data args we extracted above.
+		video_url = urlparse.ParseResult("solve", url_parts.netloc, url_parts.path, None, data_qs, None).geturl()	
+		
+		#Log(video_url)
+
+		return [
+			MediaObject(	
+				parts = [
+					PartObject(
+						key=captchaURL,
+					)
+				]
+			),
+			MediaObject(
+				parts = [PartObject(key=video_url)],
+			)
+		]
+	
+	elif ("solve://" in url):
+	
+		url = url.replace("solve://", "http://")
+		url_parts = urlparse.urlparse(url)
+		
+		# Break down query string.
+		data = dict(cgi.parse_qsl(url_parts.query))
+				
+		# Rename captcha arg to correct adcopy_response
+		data['adcopy_response'] = data['captcha']
+		del data['captcha']
+		
+		Log(data)
+		
+		html = HTTP.Request(
+			urlparse.ParseResult(url_parts.scheme, url_parts.netloc, url_parts.path, None, None, None).geturl(),
+			values=data
+		).content
+		
+		#Log(html)
+		
+		final_url = re.search("var fileUrl\\s*=\\s*\\\"([^\\\"]*)",html).group(1)
+		
+		Log("final url: " + final_url)
+		
+		return [
+			MediaObject(
+				parts = [
+					PartObject(
+						key=final_url
+					)
+				],
+			)
+		]
+
+
+def LogProviderError(msg="", ex=None):
+
+	Log("************************** PROVIDER ERROR: " + msg)
+	raise Exception(msg)
+	return []
+	
+def Unpack(script):
+
+	if script is None:
+		return
+	
+	#Log(script)
+
+	# Look for string to unpack.
+	val_to_unpack = re.search("return p}\('(.*)',\d*,\d*,'", script)
+		
+	if (val_to_unpack is None or val_to_unpack.group(1) is None):
+		return None
+	
+	# Look for substitution values.
+	sub_vals = re.search("\d{2},'([^']*)'.split", script)
+	
+	if (sub_vals is None):
+		return None
+	
+	val_to_unpack = val_to_unpack.group(1)
+	sub_vals = sub_vals.group(1).split('|')
+	#Log(val_to_unpack)
+	#Log(sub_vals)
+	
+	# Create dict to map url sub keys to sub values.
+	alphadict = dict()
+	for index_cnt in range(0, 2):
+		index = index_cnt * len(string.digits + string.ascii_lowercase)
+		strindex = str(index_cnt) if index_cnt > 0 else ""
+		for cnt in range(0, len(string.digits + string.ascii_lowercase)):
+			alphadict[strindex + (string.digits + string.ascii_lowercase)[cnt]] = cnt + index
+	
+	def SubElem(matchObj):
+		val = sub_vals[alphadict[matchObj.group(0)]]
+		if (val == ""):
+			val = matchObj.group(0)
+		return val
+
+	# Sub values into string to unpack
+	return re.sub("[0-9a-z]{1,2}", SubElem, val_to_unpack) 

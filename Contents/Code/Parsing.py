@@ -177,7 +177,8 @@ def GetSources(url):
 			
 			# Extract out provider name from source. 
 			if (providerElem.span):
-				provider = providerElem.span["title"][len("Hosted By "):]
+				provider = "".join(map(lambda x: str(x).title() if str(x).isupper() else str(x), providerElem.span.findAll(text=True)))
+				#Log(provider)
 			else:
 				provider = providerElem.img["title"][len("Hosted By "):]
 							
@@ -332,7 +333,7 @@ def GetMediaInfo(url, mediainfo, query_external=False):
 			imdb_id = mediainfo.id
 		else:
 			soup = BeautifulSoup(HTTP.Request(ICEFILMS_URL + url).content)
-			imdb_link = soup.find('a','iframe')['href']
+			imdb_link = soup.find('a','NOiframe')['href']
 			imdb_id = re.search("(tt\d+)", str(imdb_link)).group()
 		
 		if (query_external):
