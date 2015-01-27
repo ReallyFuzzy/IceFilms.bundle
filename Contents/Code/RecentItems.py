@@ -11,10 +11,10 @@ class BrowsedItems(object):
 		
 	def add(self, mediaInfo, providerURLs, path, caller=None):
 	
-		self.items.append([mediaInfo, providerURLs, path, caller])
+		self.items.insert(0, [mediaInfo, providerURLs, path, caller])
 		
 		while (len(self.items) > 50):
-			self.items.pop(0)
+			self.items.pop()
 		
 	def getCaller(self, url):
 	
@@ -34,7 +34,7 @@ class BrowsedItems(object):
 		result = [elem for elem in self.items if url in elem[1]]
 
 		if (len(result) > 0):
-			return [result[-1][0], result[-1][2]]
+			return [result[0][0], result[0][2]]
 		else:
 			return None
 			
