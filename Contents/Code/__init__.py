@@ -2357,7 +2357,7 @@ def GetAdditionalSources(imdb_id, title, year=None, season_num=None, ep_num=None
 	# to let the original plugin know when the user decides to play one of our sources.
 	if ('Referer' in Request.Headers):
 	
-		match = re.search("/video/([^/]+)/", Request.Headers['Referer'])
+		match = re.search("/video/([^/]+)", Request.Headers['Referer'])
 		caller = match.group(1) if match else None
 	
 	# Work out what type of search to carry out.
@@ -2496,9 +2496,9 @@ def PlaybackStarted(url):
 				
 			# Use the information from the mediainfo to call the PlaybackStarted method of
 			# whatever plugin requested this.
-			url = PLEX_URL + '/video/%s/playback/external/%s' % (caller, mediainfo['id'])
-			if (mediainfo['ep_num']):
-				url += "/%s/%s" % (str(mediainfo['season']), str(mediainfo['ep_num']))
+			url = PLEX_URL + '/video/%s/playback/external/%s' % (caller, mediainfo.id)
+			if (hasattr(mediainfo, 'ep_num') and mediainfo.ep_num is not None):
+				url += "/%s/%s" % (str(mediainfo.season), str(mediainfo.ep_num))
 			
 			request = urllib2.Request(url)
 			response = urllib2.urlopen(request)
@@ -2531,9 +2531,9 @@ def PlaybackStartedExternal(id, season_num=None, ep_num=None):
 	browsedItems =  cerealizer.loads(Data.Load(BROWSED_ITEMS_KEY))
 	
 	# See if the URL being played is on our recently browsed list.
-	info = browsedItems.getByID(id, season_num, ep_num)
+	item = browsedItems.getByID(id, season_num, ep_num)
 	
-	if (info is None):
+	if (item is None):
 		Log("****** ERROR: Watching Item which hasn't been browsed to")
 		return ""
 	
