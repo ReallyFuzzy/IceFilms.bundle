@@ -50,10 +50,16 @@ class SearchResult:
         return 'Google Search Result: "%s"' % self.title
 
 class GoogleSearch(object):
-    SEARCH_URL_0 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&btnG=Google+Search&complete=0"
-    NEXT_PAGE_0 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&start=%(start)d&complete=0"
-    SEARCH_URL_1 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&num=%(num)d&btnG=Google+Search&complete=0"
-    NEXT_PAGE_1 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&num=%(num)d&start=%(start)d&complete=0"
+    SEARCH_URL_0 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&btnG=Google+Search"
+    NEXT_PAGE_0 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&start=%(start)d"
+    SEARCH_URL_1 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&num=%(num)d&btnG=Google+Search"
+    NEXT_PAGE_1 = "http://www.google.%(tld)s/search?hl=%(lang)s&q=%(query)s&num=%(num)d&start=%(start)d"
+    
+    # Use IceFilm's CSE. Prevents problems with query limiting. Other methods have also been adjusted accordingly.
+    SEARCH_URL_0 = "http://www.google.%(tld)s/cse?hl=%(lang)s&cx=010591583107216882486:bafpv02vxuq&cof=FORID:9&nojs=1&q=%(query)s"
+    NEXT_PAGE_0  = "http://www.google.%(tld)s/cse?hl=%(lang)s&cx=010591583107216882486:bafpv02vxuq&cof=FORID:9&nojs=1&q=%(query)s&start=%(start)d"
+    SEARCH_URL_1 = "http://www.google.%(tld)s/cse?hl=%(lang)s&cx=010591583107216882486:bafpv02vxuq&cof=FORID:9&nojs=1&q=%(query)s&num=%(num)d"
+    NEXT_PAGE_1  = "http://www.google.%(tld)s/cse?hl=%(lang)s&cx=010591583107216882486:bafpv02vxuq&cof=FORID:9&nojs=1&q=%(query)s&num=%(num)d&start=%(start)d"
 
     def __init__(self, query, random_agent=False, debug=False, lang="en", tld="com", re_search_strings=None):
         self.query = query
@@ -226,7 +232,7 @@ class GoogleSearch(object):
         return {'from': int(matches.group(1)), 'to': int(matches.group(2)), 'total': int(matches.group(3))}
 
     def _extract_results(self, soup):
-        results = soup.findAll('li', {'class': 'g'})
+        results = soup.findAll('div', {'class': 'g'})
         ret_res = []
         for result in results:
             eres = self._extract_result(result)
@@ -250,13 +256,13 @@ class GoogleSearch(object):
         title = ''.join(title_a.findAll(text=True))
         title = self._html_unescape(title)
         url = title_a['href']
-        match = re.match(r'/url\?(url|q)=(http[^&]+)&', url)
+        match = re.match(r'/url\?q=(http[^&]+)&', url)
         if match:
-            url = urllib.unquote(match.group(2))
+            url = urllib.unquote(match.group(1))
         return title, url
 
     def _extract_description(self, result):
-        desc_div = result.find('div', {'class': re.compile(r'\bs\b')})
+        desc_div = result.find('span', {'class': re.compile(r'\bs\b')})
         if not desc_div:
             self._maybe_raise(ParseError, "Description tag in Google search result was not found", result)
             return None
